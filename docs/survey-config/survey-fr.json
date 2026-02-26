@@ -1,0 +1,105 @@
+{
+  "version": "1.0",
+  "title": "Enquête Post-Formation",
+  "questions": [
+    {
+      "id": "q1_recommend",
+      "type": "rating",
+      "text": "Quelle est la probabilité que vous recommandiez ce cours à un collègue ?",
+      "description": "Veuillez choisir un nombre, où 1 signifie que vous êtes extrêmement peu susceptible de recommander le cours et 10 signifie que vous êtes extrêmement susceptible de le recommander.",
+      "options": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q2_confidence",
+      "type": "mcq",
+      "text": "Quelle confiance avez-vous maintenant dans votre capacité à utiliser l'IA générative de manière efficace et éthique dans votre travail ?",
+      "options": [
+        "Très confiant(e)",
+        "Assez confiant(e)",
+        "Un peu confiant(e)",
+        "Pas confiant(e)",
+        "Je n'utilise pas encore l'IA générative"
+      ],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q3_clarity",
+      "type": "mcq",
+      "text": "Grâce à ce cours, êtes-vous plus clair(e) sur ce qu'il ne faut pas faire lors de l'utilisation de l'IA générative dans votre travail ?",
+      "options": ["Oui", "Un peu", "Non", "Encore incertain(e)"],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q4_likely_uses",
+      "type": "multi",
+      "text": "Grâce à ce cours, lesquelles des activités suivantes êtes-vous maintenant plus susceptible de réaliser avec l'IA générative ?",
+      "description": "Sélectionnez toutes les réponses applicables.",
+      "options": [
+        "Créer du contenu (par exemple, texte, images, audio, vidéo)",
+        "Modifier du contenu (par exemple, texte, images, audio, vidéo)",
+        "Résumer ou synthétiser du texte",
+        "Trier ou organiser plusieurs textes",
+        "Analyser, trier, étiqueter ou organiser des données",
+        "Mener des recherches",
+        "Traduire dans d'autres langues ou simplifier en langage courant",
+        "Simuler des conversations",
+        "Écrire ou analyser du code informatique"
+      ],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q5_impact",
+      "type": "mcq",
+      "text": "Que vous utilisiez ou non l'IA générative dans votre travail, pensez-vous qu'elle pourrait rendre votre travail plus facile, plus difficile, ou ni l'un ni l'autre ?",
+      "options": ["Plus facile", "Plus difficile", "Ni l'un ni l'autre", "Je ne sais pas"],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q6_most_impactful",
+      "type": "open",
+      "text": "Quelle est votre utilisation la plus impactante de l'IA générative actuellement ? Veuillez décrire un exemple.",
+      "required": true,
+      "voice_eligible": true,
+      "condition": {
+        "question_id": "q2_confidence",
+        "operator": "not_equals",
+        "value": "Je n'utilise pas encore l'IA générative"
+      }
+    },
+    {
+      "id": "q7_prepared_task",
+      "type": "open",
+      "text": "Grâce à ce cours, quelle est une tâche ou un flux de travail spécifique pour lequel vous vous sentez maintenant mieux préparé(e) avec l'aide de l'IA générative ?",
+      "required": true,
+      "voice_eligible": true
+    },
+    {
+      "id": "q8_exercises",
+      "type": "mcq",
+      "text": "Avez-vous pu compléter les exercices suggérés dans le cours ?",
+      "options": [
+        "Non, je n'ai pas eu assez de temps pour tenter les exercices",
+        "Non, j'ai décidé de ne pas faire les exercices",
+        "Non, je n'ai pas pu accéder aux sites web ou outils appropriés",
+        "Oui, j'ai essayé mais n'ai complété aucun exercice",
+        "Oui, j'ai complété certains des exercices",
+        "Oui, j'ai complété tous les exercices"
+      ],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q9_feedback",
+      "type": "open",
+      "text": "Veuillez nous dire tout ce que vous aimeriez que nous sachions sur ce cours. Nous accueillons particulièrement les commentaires qui nous aideront à l'améliorer pour les futurs apprenants.",
+      "required": false,
+      "voice_eligible": true
+    }
+  ]
+}

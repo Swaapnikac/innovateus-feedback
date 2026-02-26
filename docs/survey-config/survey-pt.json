@@ -1,0 +1,105 @@
+{
+  "version": "1.0",
+  "title": "Pesquisa Pós-Curso",
+  "questions": [
+    {
+      "id": "q1_recommend",
+      "type": "rating",
+      "text": "Qual a probabilidade de você recomendar este curso a um colega?",
+      "description": "Por favor, escolha um número, onde 1 significa que é extremamente improvável que você recomende o curso e 10 significa que é extremamente provável.",
+      "options": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q2_confidence",
+      "type": "mcq",
+      "text": "Quão confiante você se sente agora na sua capacidade de usar a IA generativa de forma eficaz e ética no seu trabalho?",
+      "options": [
+        "Muito confiante",
+        "Razoavelmente confiante",
+        "Um pouco confiante",
+        "Não confiante",
+        "Ainda não estou usando IA generativa"
+      ],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q3_clarity",
+      "type": "mcq",
+      "text": "Como resultado deste curso, você tem mais clareza sobre o que não fazer ao usar IA generativa no seu trabalho?",
+      "options": ["Sim", "Um pouco", "Não", "Ainda não tenho certeza"],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q4_likely_uses",
+      "type": "multi",
+      "text": "Como resultado deste curso, quais das seguintes atividades você agora tem mais probabilidade de realizar usando IA generativa?",
+      "description": "Selecione todas as opções aplicáveis.",
+      "options": [
+        "Criar conteúdo (por exemplo, texto, imagens, áudio, vídeo)",
+        "Editar conteúdo (por exemplo, texto, imagens, áudio, vídeo)",
+        "Resumir ou sintetizar texto",
+        "Classificar ou organizar múltiplos textos",
+        "Analisar, classificar, rotular ou organizar dados",
+        "Realizar pesquisas",
+        "Traduzir para outros idiomas ou simplificar em linguagem acessível",
+        "Simular conversas",
+        "Escrever ou analisar código de computador"
+      ],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q5_impact",
+      "type": "mcq",
+      "text": "Usando ou não IA generativa no seu trabalho, você acha que ela poderia tornar seu trabalho mais fácil, mais difícil, ou nenhum dos dois?",
+      "options": ["Mais fácil", "Mais difícil", "Nenhum dos dois", "Não sei"],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q6_most_impactful",
+      "type": "open",
+      "text": "Qual é o uso mais impactante que você faz da IA generativa atualmente? Por favor, descreva um exemplo.",
+      "required": true,
+      "voice_eligible": true,
+      "condition": {
+        "question_id": "q2_confidence",
+        "operator": "not_equals",
+        "value": "Ainda não estou usando IA generativa"
+      }
+    },
+    {
+      "id": "q7_prepared_task",
+      "type": "open",
+      "text": "Como resultado deste curso, qual é uma tarefa ou fluxo de trabalho específico para o qual você agora se sente mais preparado(a) com a ajuda da IA generativa?",
+      "required": true,
+      "voice_eligible": true
+    },
+    {
+      "id": "q8_exercises",
+      "type": "mcq",
+      "text": "Você conseguiu completar os exercícios sugeridos no curso?",
+      "options": [
+        "Não, não tive tempo suficiente para tentar os exercícios",
+        "Não, decidi não fazer os exercícios",
+        "Não, não consegui acessar os sites ou ferramentas apropriados",
+        "Sim, tentei mas não completei nenhum exercício",
+        "Sim, completei alguns dos exercícios",
+        "Sim, completei todos os exercícios"
+      ],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q9_feedback",
+      "type": "open",
+      "text": "Por favor, conte-nos qualquer coisa que gostaria que soubéssemos sobre este curso. Agradecemos especialmente comentários que nos ajudem a melhorá-lo para futuros participantes.",
+      "required": false,
+      "voice_eligible": true
+    }
+  ]
+}

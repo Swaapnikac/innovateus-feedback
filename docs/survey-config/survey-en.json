@@ -1,0 +1,105 @@
+{
+  "version": "1.0",
+  "title": "Post-Course Survey",
+  "questions": [
+    {
+      "id": "q1_recommend",
+      "type": "rating",
+      "text": "How likely are you to recommend this course to a colleague?",
+      "description": "Please choose one number, where 1 means you are extremely unlikely to recommend the course and 10 means you are extremely likely to recommend it.",
+      "options": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q2_confidence",
+      "type": "mcq",
+      "text": "How confident are you now in your ability to use generative AI effectively and ethically in your work?",
+      "options": [
+        "Very confident",
+        "Somewhat confident",
+        "A little confident",
+        "Not confident",
+        "I am not using generative AI yet"
+      ],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q3_clarity",
+      "type": "mcq",
+      "text": "As a result of this course, are you clearer about what not to do when using generative AI in your work?",
+      "options": ["Yes", "Somewhat", "No", "Still unsure"],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q4_likely_uses",
+      "type": "multi",
+      "text": "As a result of this course, which of the following are you now more likely to do when using generative AI in your work?",
+      "description": "Select all that apply.",
+      "options": [
+        "Create content (for example, text, images, audio, video)",
+        "Edit content (for example, text, images, audio, video)",
+        "Summarize or synthesize text",
+        "Sort or organize multiple texts",
+        "Analyze, sort, label, or organize data",
+        "Conduct research",
+        "Translate into other languages or simplify into plain language",
+        "Simulate conversations",
+        "Write or analyze computer code"
+      ],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q5_impact",
+      "type": "mcq",
+      "text": "Whether or not you currently use generative AI in your work, do you think generative AI could make your work easier, harder, or neither?",
+      "options": ["Easier", "Harder", "Neither", "Do not know"],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q6_most_impactful",
+      "type": "open",
+      "text": "What is your most impactful use of Generative AI now? Please describe one example.",
+      "required": true,
+      "voice_eligible": true,
+      "condition": {
+        "question_id": "q2_confidence",
+        "operator": "not_equals",
+        "value": "I am not using generative AI yet"
+      }
+    },
+    {
+      "id": "q7_prepared_task",
+      "type": "open",
+      "text": "As a result of this course, what is one specific task or workflow you now feel better prepared to do with the help of GenAI?",
+      "required": true,
+      "voice_eligible": true
+    },
+    {
+      "id": "q8_exercises",
+      "type": "mcq",
+      "text": "Were you able to complete the exercises suggested in the course?",
+      "options": [
+        "No, I did not have enough time to attempt the exercises",
+        "No, I decided not to do the exercises",
+        "No, I was not able to access the appropriate websites or tools",
+        "Yes, I attempted but did not complete any exercises",
+        "Yes, I completed some of the exercises",
+        "Yes, I completed all of the exercises"
+      ],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q9_feedback",
+      "type": "open",
+      "text": "Please tell us anything you would like us to know about this course. We especially welcome feedback that will help us improve it for future learners.",
+      "required": false,
+      "voice_eligible": true
+    }
+  ]
+}

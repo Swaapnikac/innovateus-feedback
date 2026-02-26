@@ -1,0 +1,105 @@
+{
+  "version": "1.0",
+  "title": "Encuesta Post-Curso",
+  "questions": [
+    {
+      "id": "q1_recommend",
+      "type": "rating",
+      "text": "¿Qué tan probable es que recomiende este curso a un colega?",
+      "description": "Por favor elija un número, donde 1 significa que es extremadamente improbable que recomiende el curso y 10 significa que es extremadamente probable que lo recomiende.",
+      "options": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q2_confidence",
+      "type": "mcq",
+      "text": "¿Qué tan seguro/a se siente ahora en su capacidad para usar la inteligencia artificial generativa de manera efectiva y ética en su trabajo?",
+      "options": [
+        "Muy seguro/a",
+        "Algo seguro/a",
+        "Un poco seguro/a",
+        "No me siento seguro/a",
+        "Aún no estoy usando inteligencia artificial generativa"
+      ],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q3_clarity",
+      "type": "mcq",
+      "text": "Como resultado de este curso, ¿tiene más claro qué no hacer al usar la inteligencia artificial generativa en su trabajo?",
+      "options": ["Sí", "Algo", "No", "Aún no estoy seguro/a"],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q4_likely_uses",
+      "type": "multi",
+      "text": "Como resultado de este curso, ¿cuáles de las siguientes actividades es más probable que realice al usar inteligencia artificial generativa en su trabajo?",
+      "description": "Seleccione todas las que apliquen.",
+      "options": [
+        "Crear contenido (por ejemplo, texto, imágenes, audio, video)",
+        "Editar contenido (por ejemplo, texto, imágenes, audio, video)",
+        "Resumir o sintetizar texto",
+        "Ordenar u organizar múltiples textos",
+        "Analizar, ordenar, etiquetar u organizar datos",
+        "Realizar investigación",
+        "Traducir a otros idiomas o simplificar a lenguaje sencillo",
+        "Simular conversaciones",
+        "Escribir o analizar código de computadora"
+      ],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q5_impact",
+      "type": "mcq",
+      "text": "Ya sea que use o no inteligencia artificial generativa en su trabajo, ¿cree que la IA generativa podría hacer su trabajo más fácil, más difícil, o ninguno de los dos?",
+      "options": ["Más fácil", "Más difícil", "Ninguno", "No sé"],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q6_most_impactful",
+      "type": "open",
+      "text": "¿Cuál es su uso más impactante de la IA generativa actualmente? Por favor describa un ejemplo.",
+      "required": true,
+      "voice_eligible": true,
+      "condition": {
+        "question_id": "q2_confidence",
+        "operator": "not_equals",
+        "value": "Aún no estoy usando inteligencia artificial generativa"
+      }
+    },
+    {
+      "id": "q7_prepared_task",
+      "type": "open",
+      "text": "Como resultado de este curso, ¿cuál es una tarea o flujo de trabajo específico para el que ahora se siente mejor preparado/a con la ayuda de la IA generativa?",
+      "required": true,
+      "voice_eligible": true
+    },
+    {
+      "id": "q8_exercises",
+      "type": "mcq",
+      "text": "¿Pudo completar los ejercicios sugeridos en el curso?",
+      "options": [
+        "No, no tuve suficiente tiempo para intentar los ejercicios",
+        "No, decidí no hacer los ejercicios",
+        "No, no pude acceder a los sitios web o herramientas apropiados",
+        "Sí, lo intenté pero no completé ningún ejercicio",
+        "Sí, completé algunos de los ejercicios",
+        "Sí, completé todos los ejercicios"
+      ],
+      "required": true,
+      "voice_eligible": false
+    },
+    {
+      "id": "q9_feedback",
+      "type": "open",
+      "text": "Por favor cuéntenos cualquier cosa que le gustaría que supiéramos sobre este curso. Especialmente agradecemos comentarios que nos ayuden a mejorarlo para futuros participantes.",
+      "required": false,
+      "voice_eligible": true
+    }
+  ]
+}
