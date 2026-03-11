@@ -9,13 +9,7 @@ import { api } from "@/lib/api";
 interface VoiceRecorderProps {
   onTranscriptComplete: (transcript: string) => void;
   initialTranscript?: string;
-  language?: string;
 }
-
-const LANG_MAP: Record<string, string> = {
-  en: "en-US", es: "es-ES", fr: "fr-FR", pt: "pt-BR",
-  zh: "zh-CN", hi: "hi-IN", ar: "ar-SA",
-};
 
 interface SpeechRecognitionEvent {
   results: SpeechRecognitionResultList;
@@ -26,7 +20,7 @@ interface SpeechRecognitionErrorEvent {
   error: string;
 }
 
-export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", language = "en" }: VoiceRecorderProps) {
+export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "" }: VoiceRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcript, setTranscript] = useState(initialTranscript);
@@ -140,7 +134,7 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", la
         const recognition = new SpeechRecognitionClass();
         recognition.continuous = true;
         recognition.interimResults = true;
-        recognition.lang = LANG_MAP[language] || "en-US";
+        recognition.lang = "en-US";
 
         recognition.onresult = (event: SpeechRecognitionEvent) => {
           let interim = "";

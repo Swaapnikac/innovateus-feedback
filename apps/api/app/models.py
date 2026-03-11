@@ -33,7 +33,6 @@ class Cohort(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     course_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    language_default: Mapped[str] = mapped_column(String(5), default="en")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     submissions: Mapped[list["Submission"]] = relationship(back_populates="cohort")
@@ -47,7 +46,6 @@ class Submission(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default=SubmissionStatus.started.value)
-    language: Mapped[str] = mapped_column(String(5), default="en")
     time_to_complete_sec: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     consent_version: Mapped[str] = mapped_column(String(20), default="1.0")
     client_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)

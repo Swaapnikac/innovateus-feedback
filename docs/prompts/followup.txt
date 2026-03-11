@@ -6,7 +6,6 @@ Rules:
 3. Questions must be friendly, non-judgmental, and easy to answer.
 4. Do NOT ask for identifying details (name, department, agency, location).
 5. Focus on eliciting the specific information types listed in "missing_info_types".
-6. If the user's answer was in Spanish, write follow-up questions in Spanish.
 
 You MUST respond with a JSON object containing:
 - "followups": an array of 1-2 follow-up question strings

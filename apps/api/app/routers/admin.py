@@ -172,7 +172,6 @@ async def get_responses(
                 created_at=sub.created_at,
                 completed_at=sub.completed_at,
                 status=sub.status,
-                language=sub.language,
                 time_to_complete_sec=sub.time_to_complete_sec,
                 answers=[
                     {

@@ -1,16 +1,35 @@
 import io
 import csv
+import json
 import uuid
+from pathlib import Path
 from datetime import datetime
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models import Submission, Answer, Extraction, Cohort
 
-QUESTION_IDS = [
-    "q1_recommend", "q2_confidence", "q3_clarity", "q4_likely_uses",
-    "q5_impact", "q6_most_impactful", "q7_prepared_task", "q8_exercises", "q9_feedback",
-]
+SURVEY_CONFIG_PATH = Path(__file__).resolve().parents[4] / "docs" / "survey-config" / "survey-en.json"
+
+
+def _load_questions() -> list[tuple[str, str]]:
+    """Return (question_id, question_text) pairs in survey order."""
+    with open(SURVEY_CONFIG_PATH, "r", encoding="utf-8") as f:
+        config = json.load(f)
+    return [(q["id"], q["text"]) for q in config["questions"]]
+
+
+def _format_answer(answer_raw: str | None, question_type: str | None = None) -> str:
+    if not answer_raw:
+        return ""
+    if question_type == "multi":
+        try:
+            items = json.loads(answer_raw)
+            if isinstance(items, list):
+                return " | ".join(str(item) for item in items)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return answer_raw
 
 
 async def _get_submissions(
@@ -37,44 +56,52 @@ async def generate_raw_csv(
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
 ) -> str:
+    questions = _load_questions()
     submissions = await _get_submissions(db, cohort_id, start, end)
 
-    output = io.StringIO()
-    writer = csv.writer(output)
-
-    headers = [
-        "submission_id", "cohort_id", "created_at", "language",
-    ]
-    for qid in QUESTION_IDS:
-        headers.extend([f"{qid}_answer", f"{qid}_transcript"])
-    headers.extend([
-        "q6_followup_1", "q6_followup_1_answer", "q6_followup_2", "q6_followup_2_answer",
-        "q7_followup_1", "q7_followup_1_answer", "q7_followup_2", "q7_followup_2_answer",
-        "q9_followup_1", "q9_followup_1_answer", "q9_followup_2", "q9_followup_2_answer",
-    ])
-    writer.writerow(headers)
+    all_rows: list[tuple[Submission, dict[str, Answer]]] = []
+    max_followups: dict[str, int] = {qid: 0 for qid, _ in questions}
 
     for sub in submissions:
         result = await db.execute(
             select(Answer).where(Answer.submission_id == sub.id)
         )
         answers = {a.question_id: a for a in result.scalars().all()}
+        all_rows.append((sub, answers))
 
-        row = [str(sub.id), str(sub.cohort_id), sub.created_at.isoformat(), sub.language]
-        for qid in QUESTION_IDS:
+        for qid, _ in questions:
             a = answers.get(qid)
-            row.append(a.answer_raw if a else "")
-            row.append(a.transcript if a else "")
+            if a:
+                count = 0
+                if a.followup_1:
+                    count = 1
+                if a.followup_2:
+                    count = 2
+                max_followups[qid] = max(max_followups[qid], count)
 
-        for qid in ["q6_most_impactful", "q7_prepared_task", "q9_feedback"]:
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    headers: list[str] = ["RespondentID"]
+    for i, (qid, _) in enumerate(questions, 1):
+        headers.extend([f"Q{i}", f"A{i}"])
+        for j in range(1, max_followups[qid] + 1):
+            headers.extend([f"Q{i}_FQ{j}", f"Q{i}_FA{j}"])
+    writer.writerow(headers)
+
+    for respondent_id, (sub, answers) in enumerate(all_rows, 1):
+        row: list[str] = [str(respondent_id)]
+        for qid, qtext in questions:
             a = answers.get(qid)
-            row.extend([
-                a.followup_1 if a else "",
-                a.followup_1_answer if a else "",
-                a.followup_2 if a else "",
-                a.followup_2_answer if a else "",
-            ])
-
+            row.append(qtext)
+            row.append(_format_answer(a.answer_raw if a else None, a.question_type if a else None))
+            for j in range(1, max_followups[qid] + 1):
+                if a and j == 1:
+                    row.extend([a.followup_1 or "", a.followup_1_answer or ""])
+                elif a and j == 2:
+                    row.extend([a.followup_2 or "", a.followup_2_answer or ""])
+                else:
+                    row.extend(["", ""])
         writer.writerow(row)
 
     return output.getvalue()
@@ -86,17 +113,15 @@ async def generate_structured_csv(
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
 ) -> str:
+    questions = _load_questions()
+    start_question_id = questions[0][0] if questions else None
     submissions = await _get_submissions(db, cohort_id, start, end)
 
     output = io.StringIO()
     writer = csv.writer(output)
+    writer.writerow(["RespondentID", "MainQuestion", "FollowUpQuestions", "Answers"])
 
-    headers = [
-        "submission_id", "recommend_score", "confidence_level",
-        "planned_task_or_workflow", "barriers", "enablers",
-        "public_benefit", "themes", "success_story_candidate",
-    ]
-    writer.writerow(headers)
+    respondent_id = 0
 
     for sub in submissions:
         result = await db.execute(
@@ -104,23 +129,34 @@ async def generate_structured_csv(
         )
         answers = {a.question_id: a for a in result.scalars().all()}
 
-        extraction = await db.get(Extraction, sub.id)
+        for qid, qtext in questions:
+            a = answers.get(qid)
+            if not a:
+                continue
 
-        recommend = answers.get("q1_recommend")
-        confidence = answers.get("q2_confidence")
+            if qid == start_question_id:
+                respondent_id += 1
 
-        row = [
-            str(sub.id),
-            recommend.answer_raw if recommend else "",
-            confidence.answer_raw if confidence else "",
-            extraction.planned_task_or_workflow if extraction else "",
-            "; ".join(extraction.barriers) if extraction and extraction.barriers else "",
-            "; ".join(extraction.enablers) if extraction and extraction.enablers else "",
-            extraction.public_benefit if extraction else "",
-            "; ".join(extraction.top_themes) if extraction and extraction.top_themes else "",
-            extraction.success_story_candidate if extraction else "",
-        ]
-        writer.writerow(row)
+            main_answer = _format_answer(a.answer_raw, a.question_type)
+
+            followup_qs: list[str] = []
+            answer_parts: list[str] = [main_answer] if main_answer else []
+
+            if a.followup_1:
+                followup_qs.append(a.followup_1)
+                if a.followup_1_answer:
+                    answer_parts.append(a.followup_1_answer)
+            if a.followup_2:
+                followup_qs.append(a.followup_2)
+                if a.followup_2_answer:
+                    answer_parts.append(a.followup_2_answer)
+
+            writer.writerow([
+                respondent_id,
+                qtext,
+                " | ".join(followup_qs),
+                " | ".join(answer_parts),
+            ])
 
     return output.getvalue()
 

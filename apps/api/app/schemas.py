@@ -23,7 +23,6 @@ class SurveyConfig(BaseModel):
 
 class StartSubmissionRequest(BaseModel):
     cohort_id: uuid.UUID
-    language: str = "en"
     consent_version: str = "1.0"
     client_metadata: Optional[dict] = None
 
@@ -54,7 +53,6 @@ class AnswerResponse(BaseModel):
 class VaguenessRequest(BaseModel):
     question_text: str
     answer_text: str
-    language: str = "en"
 
 
 class VaguenessResponse(BaseModel):
@@ -67,7 +65,6 @@ class FollowUpRequest(BaseModel):
     question_text: str
     answer_text: str
     missing_info_types: list[str]
-    language: str = "en"
 
 
 class FollowUpResponse(BaseModel):
@@ -118,7 +115,6 @@ class SubmissionSummary(BaseModel):
     created_at: datetime
     completed_at: Optional[datetime] = None
     status: str
-    language: str
     time_to_complete_sec: Optional[int] = None
     answers: list[dict] = []
     extraction: Optional[dict] = None
@@ -137,7 +133,6 @@ class CohortResponse(BaseModel):
     id: uuid.UUID
     name: str
     course_name: str
-    language_default: str
     created_at: datetime
 
     model_config = {"from_attributes": True}

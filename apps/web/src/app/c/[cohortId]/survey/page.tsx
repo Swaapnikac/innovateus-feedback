@@ -40,18 +40,17 @@ export default function SurveyPage() {
   const [completing, setCompleting] = useState(false);
 
   const submissionId = typeof window !== "undefined" ? sessionStorage.getItem("submission_id") : null;
-  const language = typeof window !== "undefined" ? sessionStorage.getItem("survey_language") || "en" : "en";
 
   useEffect(() => {
     if (!submissionId) {
       router.replace(`/c/${cohortId}`);
       return;
     }
-    api.getSurvey(cohortId, language).then((data) => {
+    api.getSurvey(cohortId).then((data) => {
       setQuestions(data.survey.questions);
       setLoading(false);
     });
-  }, [cohortId, language, submissionId, router]);
+  }, [cohortId, submissionId, router]);
 
   const visibleQuestions = questions.filter((q) => {
     if (!q.condition) return true;
@@ -66,7 +65,7 @@ export default function SurveyPage() {
   const currentQuestion = visibleQuestions[currentStep];
   const currentAnswer = currentQuestion ? answers[currentQuestion.id] : undefined;
 
-  const defaultAnswer: AnswerState = { value: "", multiValues: [], inputMode: "text" };
+  const defaultAnswer: AnswerState = { value: "", multiValues: [], inputMode: "voice" };
 
   const getAnswer = (qId: string): AnswerState =>
     answers[qId] || defaultAnswer;
@@ -143,14 +142,13 @@ export default function SurveyPage() {
     if (needsVaguenessCheck) {
       setCheckingVagueness(true);
       try {
-        const result = await api.checkVagueness(currentQuestion.text, ans.value, language);
+        const result = await api.checkVagueness(currentQuestion.text, ans.value);
 
         if (result.is_vague) {
           const followupResult = await api.getFollowups(
             currentQuestion.text,
             ans.value,
             result.missing_info_types,
-            language
           );
           if (followupResult.followups.length > 0) {
             updateAnswer(currentQuestion.id, {
@@ -247,6 +245,7 @@ export default function SurveyPage() {
 
             {currentQuestion.type === "open" && (
               <OpenEndedQuestion
+                key={currentQuestion.id}
                 value={getAnswer(currentQuestion.id).value}
                 onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
                 voiceEligible={currentQuestion.voice_eligible}
@@ -256,7 +255,6 @@ export default function SurveyPage() {
                 onTranscriptReady={(transcript) =>
                   updateAnswer(currentQuestion.id, { transcript, value: transcript })
                 }
-                language={language}
               />
             )}
           </QuestionCard>
@@ -266,7 +264,6 @@ export default function SurveyPage() {
           <FollowUpPanel
             followups={getAnswer(currentQuestion.id).followups!}
             onComplete={handleFollowupComplete}
-            language={language}
           />
         )}
 

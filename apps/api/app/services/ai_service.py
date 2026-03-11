@@ -24,7 +24,7 @@ def _has_api_key() -> bool:
     return bool(key) and key != "sk-your-key-here" and len(key) > 10
 
 
-async def detect_vagueness(question_text: str, answer_text: str, language: str = "en") -> dict:
+async def detect_vagueness(question_text: str, answer_text: str) -> dict:
     if not _has_api_key():
         return {"is_vague": False, "reason": "AI analysis unavailable", "missing_info_types": []}
 
@@ -42,7 +42,6 @@ async def detect_vagueness(question_text: str, answer_text: str, language: str =
                     "content": json.dumps({
                         "question": question_text,
                         "answer": answer_text,
-                        "language": language,
                     }),
                 },
             ],
@@ -64,7 +63,6 @@ async def generate_followups(
     question_text: str,
     answer_text: str,
     missing_info_types: list[str],
-    language: str = "en",
 ) -> list[str]:
     if not _has_api_key():
         return []
@@ -84,7 +82,6 @@ async def generate_followups(
                         "question": question_text,
                         "answer": answer_text,
                         "missing_info_types": missing_info_types,
-                        "language": language,
                     }),
                 },
             ],
@@ -99,7 +96,7 @@ async def generate_followups(
         return []
 
 
-async def extract_structured(answers: list[dict], language: str = "en") -> dict:
+async def extract_structured(answers: list[dict]) -> dict:
     empty_result = {
         "what_was_tried": None,
         "planned_task_or_workflow": None,
@@ -127,7 +124,6 @@ async def extract_structured(answers: list[dict], language: str = "en") -> dict:
                     "role": "user",
                     "content": json.dumps({
                         "answers": answers,
-                        "language": language,
                     }),
                 },
             ],

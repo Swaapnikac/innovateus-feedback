@@ -16,4 +16,3 @@ Hard rules:
 3. Strip any identifying information (names, specific agencies, email addresses) from all extracted text.
 4. The "success_story_candidate" should be a compelling, de-identified quote that could be shared publicly.
 5. Keep all extracted text concise — 1-2 sentences maximum per field.
-6. Respond in the same language as the majority of the participant's answers.

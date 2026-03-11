@@ -33,7 +33,6 @@ export interface SurveyQuestion {
 
 export interface SurveyConfig {
   cohort_id: string;
-  language: string;
   survey: {
     version: string;
     title: string;
@@ -63,15 +62,14 @@ export interface ExtractionResult {
 }
 
 export const api = {
-  getSurvey: (cohortId: string, lang = "en") =>
-    request<SurveyConfig>(`/v1/survey/${cohortId}?lang=${lang}`),
+  getSurvey: (cohortId: string) =>
+    request<SurveyConfig>(`/v1/survey/${cohortId}`),
 
-  startSubmission: (cohortId: string, language: string, consentVersion = "1.0") =>
+  startSubmission: (cohortId: string, consentVersion = "1.0") =>
     request<{ submission_id: string }>("/v1/submissions/start", {
       method: "POST",
       body: JSON.stringify({
         cohort_id: cohortId,
-        language,
         consent_version: consentVersion,
       }),
     }),
@@ -114,13 +112,12 @@ export const api = {
     return res.json();
   },
 
-  checkVagueness: (questionText: string, answerText: string, language = "en") =>
+  checkVagueness: (questionText: string, answerText: string) =>
     request<VaguenessResult>("/v1/ai/vagueness", {
       method: "POST",
       body: JSON.stringify({
         question_text: questionText,
         answer_text: answerText,
-        language,
       }),
     }),
 
@@ -128,7 +125,6 @@ export const api = {
     questionText: string,
     answerText: string,
     missingInfoTypes: string[],
-    language = "en"
   ) =>
     request<FollowUpResult>("/v1/ai/followups", {
       method: "POST",
@@ -136,7 +132,6 @@ export const api = {
         question_text: questionText,
         answer_text: answerText,
         missing_info_types: missingInfoTypes,
-        language,
       }),
     }),
 
@@ -182,7 +177,6 @@ export const api = {
         created_at: string;
         completed_at: string | null;
         status: string;
-        language: string;
         time_to_complete_sec: number | null;
         answers: Array<Record<string, unknown>>;
         extraction: ExtractionResult | null;
@@ -194,7 +188,7 @@ export const api = {
   },
 
   getCohorts: () =>
-    request<Array<{ id: string; name: string; course_name: string; language_default: string; created_at: string }>>(
+    request<Array<{ id: string; name: string; course_name: string; created_at: string }>>(
       "/v1/admin/cohorts"
     ),
 

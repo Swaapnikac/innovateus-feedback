@@ -28,7 +28,6 @@ async def start_submission(req: StartSubmissionRequest, db: AsyncSession = Depen
 
     submission = Submission(
         cohort_id=req.cohort_id,
-        language=req.language,
         consent_version=req.consent_version,
         client_metadata=req.client_metadata,
     )
@@ -95,7 +94,7 @@ async def complete_submission(submission_id: uuid.UUID, db: AsyncSession = Depen
 
     extraction_data = None
     try:
-        extraction_data = await extract_structured(answers_for_extraction, submission.language)
+        extraction_data = await extract_structured(answers_for_extraction)
     except Exception as e:
         logger.warning(f"Extraction failed for submission {submission_id}: {e}")
         extraction_data = {

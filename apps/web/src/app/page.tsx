@@ -9,7 +9,6 @@ import {
   FileText,
   MessageSquare,
   CheckCircle2,
-  Globe,
   Clock,
   Sparkles,
 } from "lucide-react";
@@ -68,7 +67,7 @@ export default function HomePage() {
 
             <p className="text-lg text-[#124D8F]/60 leading-relaxed max-w-xl">
               A privacy-first feedback tool that makes it easy to share your course experience — 
-              speak or type, in your language, in just a few minutes.
+              speak or type, in just a few minutes.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3">
@@ -97,7 +96,7 @@ export default function HomePage() {
                 <Shield className="h-3.5 w-3.5" /> Anonymous
               </span>
               <span className="flex items-center gap-1.5">
-                <Globe className="h-3.5 w-3.5" /> 7 languages
+                <Mic className="h-3.5 w-3.5" /> Voice & Text
               </span>
             </div>
           </div>
@@ -140,13 +139,6 @@ export default function HomePage() {
               iconColor: "text-[#097261]",
               title: "Privacy First",
               desc: "Completely anonymous — no login required. Audio is never stored on servers; only your edited transcript is saved.",
-            },
-            {
-              icon: Globe,
-              color: "bg-[#124D8F]/8",
-              iconColor: "text-[#124D8F]",
-              title: "Multilingual Support",
-              desc: "Available in English, Spanish, French, Portuguese, Chinese, Hindi, and Arabic — with voice recognition in each.",
             },
             {
               icon: BarChart3,

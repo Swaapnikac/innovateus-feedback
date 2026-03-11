@@ -24,7 +24,6 @@ async def seed():
                 id=DEFAULT_COHORT_ID,
                 name="Pilot Cohort 1",
                 course_name="Generative AI for Government",
-                language_default="en",
             )
             session.add(cohort)
             await session.commit()

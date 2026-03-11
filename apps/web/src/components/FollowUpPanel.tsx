@@ -10,13 +10,12 @@ import { VoiceRecorder } from "./VoiceRecorder";
 interface FollowUpPanelProps {
   followups: string[];
   onComplete: (answers: { followup_1_answer?: string; followup_2_answer?: string }) => void;
-  language?: string;
 }
 
-export function FollowUpPanel({ followups, onComplete, language = "en" }: FollowUpPanelProps) {
+export function FollowUpPanel({ followups, onComplete }: FollowUpPanelProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
-  const [inputMode, setInputMode] = useState<"text" | "voice">("text");
+  const [inputMode, setInputMode] = useState<"text" | "voice">("voice");
 
   const currentQuestion = followups[currentIndex];
   const isLast = currentIndex >= followups.length - 1;
@@ -29,7 +28,7 @@ export function FollowUpPanel({ followups, onComplete, language = "en" }: Follow
       });
     } else {
       setCurrentIndex(currentIndex + 1);
-      setInputMode("text");
+      setInputMode("voice");
     }
   };
 
@@ -41,7 +40,7 @@ export function FollowUpPanel({ followups, onComplete, language = "en" }: Follow
       });
     } else {
       setCurrentIndex(currentIndex + 1);
-      setInputMode("text");
+      setInputMode("voice");
     }
   };
 
@@ -99,7 +98,6 @@ export function FollowUpPanel({ followups, onComplete, language = "en" }: Follow
           <VoiceRecorder
             onTranscriptComplete={handleTranscriptComplete}
             initialTranscript={answers[currentIndex] || ""}
-            language={language}
           />
         )}
 

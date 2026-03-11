@@ -17,5 +17,3 @@ You MUST respond with a JSON object containing:
 - "missing_info_types": an array of what's missing, from: ["example", "context", "outcome", "barrier", "task"]
 
 If the answer is specific, "missing_info_types" should be an empty array.
-
-Respond in the same language as the user's answer when writing the "reason" field.

@@ -47,7 +47,6 @@ interface ResponseItem {
   created_at: string;
   completed_at: string | null;
   status: string;
-  language: string;
   time_to_complete_sec: number | null;
   answers: Array<Record<string, unknown>>;
   extraction: ExtractionResult | null;
@@ -376,7 +375,6 @@ export default function DashboardPage() {
                   <TableRow>
                     <TableHead>Date</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Language</TableHead>
                     <TableHead>Time</TableHead>
                     <TableHead>Recommend</TableHead>
                     <TableHead>Planned Workflow</TableHead>
@@ -400,7 +398,6 @@ export default function DashboardPage() {
                             {item.status}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-xs uppercase">{item.language}</TableCell>
                         <TableCell className="text-xs">
                           {item.time_to_complete_sec
                             ? `${Math.round(item.time_to_complete_sec / 60)}m`
