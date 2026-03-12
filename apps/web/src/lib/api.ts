@@ -192,6 +192,21 @@ export const api = {
       "/v1/admin/cohorts"
     ),
 
+  editorLogin: (password: string) =>
+    request<{ token: string }>("/v1/admin/editor/login", {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    }),
+
+  getEditorSurvey: (cohortId: string) =>
+    request<SurveyConfig>(`/v1/admin/editor/survey/${cohortId}`),
+
+  saveEditorSurvey: (cohortId: string, config: { version: string; title: string; questions: SurveyQuestion[] }) =>
+    request<{ status: string; cohort_id: string }>(`/v1/admin/editor/survey/${cohortId}`, {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
+
   exportUrl: (type: "raw.csv" | "structured.csv" | "summary.pdf" | "summary.pptx", params?: {
     cohort_id?: string; start?: string; end?: string;
   }) => {

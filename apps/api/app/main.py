@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
-from app.routers import survey, submissions, transcribe, ai, admin
+from app.routers import survey, submissions, transcribe, ai, admin, editor
 
 settings = get_settings()
 
@@ -20,6 +20,7 @@ app.include_router(submissions.router, prefix="/v1", tags=["submissions"])
 app.include_router(transcribe.router, prefix="/v1", tags=["transcribe"])
 app.include_router(ai.router, prefix="/v1", tags=["ai"])
 app.include_router(admin.router, prefix="/v1/admin", tags=["admin"])
+app.include_router(editor.router, prefix="/v1/admin", tags=["editor"])
 
 
 @app.get("/health")

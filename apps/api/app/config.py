@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     jwt_secret: str = "change-me-in-production"
     admin_password_hash: str = ""
+    editor_password_hash: str = ""
     cors_origins: str = "http://localhost:3000"
     environment: str = "development"
 

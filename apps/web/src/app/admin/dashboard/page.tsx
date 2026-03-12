@@ -37,6 +37,7 @@ import {
   LogOut,
   BarChart3,
   TrendingUp,
+  Settings,
 } from "lucide-react";
 import { api, type ExtractionResult } from "@/lib/api";
 import { InnovateLogo } from "@/components/InnovateLogo";
@@ -160,10 +161,16 @@ export default function DashboardPage() {
           <div className="h-6 w-px bg-[#124D8F]/10" />
           <span className="text-xs font-semibold text-[#124D8F]/40 uppercase tracking-widest">Dashboard</span>
         </div>
-        <Button variant="outline" size="sm" onClick={handleLogout} className="rounded-full border-brand-blue/15 text-brand-blue/60 hover:bg-brand-blue/5 gap-2">
-          <LogOut className="h-4 w-4" />
-          Sign Out
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => router.push("/admin/editor/login")} className="rounded-full border-brand-dark-yellow/20 text-brand-dark-yellow hover:bg-brand-yellow/10 gap-2">
+            <Settings className="h-4 w-4" />
+            Survey Editor
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleLogout} className="rounded-full border-brand-blue/15 text-brand-blue/60 hover:bg-brand-blue/5 gap-2">
+            <LogOut className="h-4 w-4" />
+            Sign Out
+          </Button>
+        </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">

@@ -8,7 +8,7 @@
       "text": "How likely are you to recommend this course to a colleague?",
       "description": "Please choose one number, where 1 means you are extremely unlikely to recommend the course and 10 means you are extremely likely to recommend it.",
       "options": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-      "required": true,
+      "required": false,
       "voice_eligible": false
     },
     {
@@ -22,7 +22,7 @@
         "Not confident",
         "I am not using generative AI yet"
       ],
-      "required": true,
+      "required": false,
       "voice_eligible": false
     },
     {
@@ -30,7 +30,7 @@
       "type": "mcq",
       "text": "As a result of this course, are you clearer about what not to do when using generative AI in your work?",
       "options": ["Yes", "Somewhat", "No", "Still unsure"],
-      "required": true,
+      "required": false,
       "voice_eligible": false
     },
     {
@@ -49,7 +49,7 @@
         "Simulate conversations",
         "Write or analyze computer code"
       ],
-      "required": true,
+      "required": false,
       "voice_eligible": false
     },
     {
@@ -57,14 +57,14 @@
       "type": "mcq",
       "text": "Whether or not you currently use generative AI in your work, do you think generative AI could make your work easier, harder, or neither?",
       "options": ["Easier", "Harder", "Neither", "Do not know"],
-      "required": true,
+      "required": false,
       "voice_eligible": false
     },
     {
       "id": "q6_most_impactful",
       "type": "open",
       "text": "What is your most impactful use of Generative AI now? Please describe one example.",
-      "required": true,
+      "required": false,
       "voice_eligible": true,
       "condition": {
         "question_id": "q2_confidence",
@@ -76,7 +76,7 @@
       "id": "q7_prepared_task",
       "type": "open",
       "text": "As a result of this course, what is one specific task or workflow you now feel better prepared to do with the help of GenAI?",
-      "required": true,
+      "required": false,
       "voice_eligible": true
     },
     {
@@ -91,7 +91,7 @@
         "Yes, I completed some of the exercises",
         "Yes, I completed all of the exercises"
       ],
-      "required": true,
+      "required": false,
       "voice_eligible": false
     },
     {

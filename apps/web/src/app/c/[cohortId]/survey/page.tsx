@@ -220,51 +220,61 @@ export default function SurveyPage() {
       <div className="max-w-2xl mx-auto px-4 space-y-6">
         <ProgressBar current={currentStep + 1} total={visibleQuestions.length} />
 
-        {currentQuestion && !showFollowups && (
+        {currentQuestion && (
           <QuestionCard
             text={currentQuestion.text}
             description={currentQuestion.description}
             required={currentQuestion.required}
           >
-            {(currentQuestion.type === "rating" || currentQuestion.type === "mcq") && (
-              <ChoiceQuestion
-                type={currentQuestion.type}
-                options={currentQuestion.options || []}
-                value={getAnswer(currentQuestion.id).value}
-                onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
-              />
+            {!showFollowups && (
+              <>
+                {(currentQuestion.type === "rating" || currentQuestion.type === "mcq") && (
+                  <ChoiceQuestion
+                    type={currentQuestion.type}
+                    options={currentQuestion.options || []}
+                    value={getAnswer(currentQuestion.id).value}
+                    onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
+                  />
+                )}
+
+                {currentQuestion.type === "multi" && (
+                  <MultiSelectQuestion
+                    options={(currentQuestion.options as string[]) || []}
+                    value={getAnswer(currentQuestion.id).multiValues}
+                    onChange={(v) => updateAnswer(currentQuestion.id, { multiValues: v })}
+                  />
+                )}
+
+                {currentQuestion.type === "open" && (
+                  <OpenEndedQuestion
+                    key={currentQuestion.id}
+                    value={getAnswer(currentQuestion.id).value}
+                    onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
+                    voiceEligible={currentQuestion.voice_eligible}
+                    onInputModeChange={(mode) =>
+                      updateAnswer(currentQuestion.id, { inputMode: mode })
+                    }
+                    onTranscriptReady={(transcript) =>
+                      updateAnswer(currentQuestion.id, { transcript, value: transcript })
+                    }
+                  />
+                )}
+              </>
             )}
 
-            {currentQuestion.type === "multi" && (
-              <MultiSelectQuestion
-                options={(currentQuestion.options as string[]) || []}
-                value={getAnswer(currentQuestion.id).multiValues}
-                onChange={(v) => updateAnswer(currentQuestion.id, { multiValues: v })}
-              />
+            {showFollowups && (
+              <div className="rounded-lg bg-brand-light-blue/40 px-4 py-3 text-sm text-brand-blue/70 italic">
+                &ldquo;{getAnswer(currentQuestion.id).value}&rdquo;
+              </div>
             )}
 
-            {currentQuestion.type === "open" && (
-              <OpenEndedQuestion
-                key={currentQuestion.id}
-                value={getAnswer(currentQuestion.id).value}
-                onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
-                voiceEligible={currentQuestion.voice_eligible}
-                onInputModeChange={(mode) =>
-                  updateAnswer(currentQuestion.id, { inputMode: mode })
-                }
-                onTranscriptReady={(transcript) =>
-                  updateAnswer(currentQuestion.id, { transcript, value: transcript })
-                }
+            {showFollowups && getAnswer(currentQuestion.id).followups && (
+              <FollowUpPanel
+                followups={getAnswer(currentQuestion.id).followups!}
+                onComplete={handleFollowupComplete}
               />
             )}
           </QuestionCard>
-        )}
-
-        {showFollowups && currentQuestion && getAnswer(currentQuestion.id).followups && (
-          <FollowUpPanel
-            followups={getAnswer(currentQuestion.id).followups!}
-            onComplete={handleFollowupComplete}
-          />
         )}
 
         <div className="flex justify-between max-w-2xl mx-auto">

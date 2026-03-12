@@ -39,12 +39,27 @@ def verify_token(token: str) -> dict:
         )
 
 
-async def require_admin(request: Request):
-    token = request.cookies.get("admin_token")
+def _extract_token(request: Request, cookie_name: str) -> str | None:
+    token = request.cookies.get(cookie_name)
     if not token:
         auth_header = request.headers.get("authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
+    return token
+
+
+async def require_admin(request: Request):
+    token = _extract_token(request, "admin_token")
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     return verify_token(token)
+
+
+async def require_editor(request: Request):
+    token = _extract_token(request, "editor_token")
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    payload = verify_token(token)
+    if payload.get("role") != "editor":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Editor access required")
+    return payload

@@ -136,3 +136,13 @@ class CohortResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class EditorLoginRequest(BaseModel):
+    password: str
+
+
+class SaveSurveyRequest(BaseModel):
+    version: str = "1.0"
+    title: str
+    questions: list[SurveyQuestion]

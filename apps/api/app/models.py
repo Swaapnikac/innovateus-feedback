@@ -33,6 +33,7 @@ class Cohort(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     course_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    survey_config: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     submissions: Mapped[list["Submission"]] = relationship(back_populates="cohort")
