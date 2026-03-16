@@ -11,6 +11,7 @@ A privacy-first, no-login web check-in that collects InnovateUS post-course feed
 - **Speech-to-Text**: OpenAI Whisper API
 - **Exports**: CSV (pandas), PDF (ReportLab), PPTX (python-pptx)
 - **i18n**: English + Spanish via next-intl
+- **Survey Versioning**: Immutable config snapshots with auto-diffing and per-response version stamps
 
 ## Quick Start
 
@@ -83,6 +84,7 @@ npm run dev
 
 - **Survey (participant)**: http://localhost:3000/c/00000000-0000-0000-0000-000000000001
 - **Manager Dashboard**: http://localhost:3000/admin/login
+- **Survey Editor**: http://localhost:3000/admin/editor/login
 - **API Docs**: http://localhost:8000/docs
 
 ## Project Structure
@@ -93,19 +95,23 @@ innovateus-feedback/
     web/                  # Next.js frontend
       src/
         app/              # Pages (consent, survey, done, admin)
-        components/       # UI components
-        lib/              # API client, i18n config
+          admin/
+            dashboard/    # Manager dashboard with version filter
+            editor/       # Survey editor with version history
+        components/       # UI components (VoiceRecorder, etc.)
+        lib/              # API client, types, i18n config
         messages/         # Translation files (en, es)
     api/                  # FastAPI backend
       app/
-        routers/          # API endpoints
+        routers/          # API endpoints (survey, submissions, admin, editor, ai)
         services/         # AI, transcription, export logic
-        models.py         # SQLAlchemy models
+        models.py         # SQLAlchemy models (Cohort, Submission, Answer, SurveyConfigVersion)
         schemas.py        # Pydantic schemas
-      alembic/            # Database migrations
+      alembic/
+        versions/         # Database migrations (001–003)
   docs/
     prompts/              # AI prompt templates
-    survey-config/        # Survey definition JSON (en, es)
+    survey-config/        # Survey definition JSON with question groups
   infra/                  # Docker configuration
 ```
 
@@ -125,11 +131,34 @@ innovateus-feedback/
 - Live transcript editing before submission
 - Audio never persisted — only held in memory
 
+### Question Grouping & Randomization
+- Group questions by type (e.g. closed-ended vs open-ended)
+- Per-group randomization toggle — each respondent sees a different question order within each group
+- Spreads attrition evenly across questions instead of concentrating it on later items
+- Server-side shuffling respects conditional dependencies (questions with conditions always appear after their prerequisites)
+- Editor UI for creating, editing, and reordering groups
+
+### Survey Version Control
+- Every meaningful edit creates an immutable versioned snapshot (`v1`, `v2`, `v3`...)
+- Auto-generated change summaries describe what changed (added/removed questions, text edits, option changes, reordering, etc.)
+- Duplicate saves are detected — no new version created when config hasn't changed
+- Each submission is stamped with the survey version it was collected against
+- Version history panel in the editor with timestamps, change summaries, and one-click restore
+- Admin dashboard supports filtering responses by survey version
+- Restoring an old version creates a new forward version (history is never rewritten)
+
 ### Manager Dashboard
 - Overview metrics (submissions, completion rate, avg scores)
-- Response table with filters (cohort, date range)
+- Response table with filters (cohort, date range, survey version)
 - Top themes, barriers, success stories
 - Export: Raw CSV, Structured CSV, Summary PDF, Summary PPTX
+
+### Survey Editor
+- Visual question editor with drag-to-reorder, conditional logic, and group assignment
+- Question group management with randomization toggles
+- Active version label displayed next to save button
+- Save feedback: "Saved as v4" or "No changes detected"
+- Collapsible version history panel with view and restore
 
 ### Privacy
 - No participant login or identifiers
@@ -140,8 +169,8 @@ innovateus-feedback/
 ## API Endpoints
 
 ### Public (Participant)
-- `GET /v1/survey/{cohort_id}` — Survey config
-- `POST /v1/submissions/start` — Start submission
+- `GET /v1/survey/{cohort_id}` — Survey config (randomized per request)
+- `POST /v1/submissions/start` — Start submission (stamps survey version)
 - `POST /v1/submissions/{id}/answer` — Save answer
 - `POST /v1/submissions/{id}/complete` — Complete + extract
 - `POST /v1/transcribe` — Audio to text (Whisper)
@@ -150,12 +179,38 @@ innovateus-feedback/
 
 ### Admin (Manager)
 - `POST /v1/admin/login` — Password auth
-- `GET /v1/admin/metrics` — Dashboard metrics
-- `GET /v1/admin/responses` — Paginated responses
+- `GET /v1/admin/metrics` — Dashboard metrics (filterable by survey version)
+- `GET /v1/admin/responses` — Paginated responses (filterable by survey version)
+- `GET /v1/admin/cohorts` — List all cohorts
 - `GET /v1/admin/export/raw.csv` — Raw data export
 - `GET /v1/admin/export/structured.csv` — Structured export
 - `GET /v1/admin/export/summary.pdf` — PDF report
 - `GET /v1/admin/export/summary.pptx` — PPTX report
+
+### Editor
+- `POST /v1/admin/editor/login` — Editor password auth
+- `GET /v1/admin/editor/survey/{cohort_id}` — Get survey config (canonical order, includes active version)
+- `PUT /v1/admin/editor/survey/{cohort_id}` — Save survey config (auto-versions on change)
+- `GET /v1/admin/editor/survey/{cohort_id}/versions` — List version history
+- `GET /v1/admin/editor/survey/{cohort_id}/versions/{label}` — Get specific version config
+- `POST /v1/admin/editor/survey/{cohort_id}/versions/{label}/restore` — Restore old version
+
+## Database Migrations
+
+The project uses Alembic for schema migrations:
+
+| Migration | Description |
+|---|---|
+| `001` | Initial schema (cohorts, submissions, answers, extractions) |
+| `002` | Add extractions table |
+| `003` | Survey version control (survey_config_versions table, survey_version on submissions, active_version on cohorts, v1 backfill) |
+
+Run all pending migrations:
+
+```bash
+cd apps/api
+alembic upgrade head
+```
 
 ## Environment Variables
 
@@ -165,6 +220,8 @@ innovateus-feedback/
 | `DATABASE_URL_SYNC` | Sync PostgreSQL connection string (Alembic) |
 | `OPENAI_API_KEY` | OpenAI API key |
 | `ADMIN_PASSWORD_HASH` | Bcrypt hash of admin password |
+| `EDITOR_PASSWORD_HASH` | Bcrypt hash of editor password |
 | `JWT_SECRET` | JWT signing secret |
 | `CORS_ORIGINS` | Allowed CORS origins |
 | `NEXT_PUBLIC_API_URL` | Backend URL for frontend |
+| `ENVIRONMENT` | `development` or `production` |
