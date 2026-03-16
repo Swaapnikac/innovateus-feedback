@@ -1,5 +1,7 @@
 # InnovateUS Voice Feedback Tool
 
+[![Dependency Review](https://img.shields.io/badge/dependencies-monitored-brightgreen)](https://github.com/Swaapnikac/innovateus-feedback/security)
+
 A privacy-first, no-login web check-in that collects InnovateUS post-course feedback using voice-to-text for open-ended questions, adds bounded AI follow-ups when responses are vague, extracts structured insights, and provides a program manager dashboard with exports.
 
 ## Architecture
