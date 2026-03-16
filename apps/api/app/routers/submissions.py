@@ -29,6 +29,7 @@ async def start_submission(req: StartSubmissionRequest, db: AsyncSession = Depen
     submission = Submission(
         cohort_id=req.cohort_id,
         consent_version=req.consent_version,
+        survey_version=cohort.active_version,
         client_metadata=req.client_metadata,
     )
     db.add(submission)

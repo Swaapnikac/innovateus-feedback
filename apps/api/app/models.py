@@ -34,9 +34,11 @@ class Cohort(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     course_name: Mapped[str] = mapped_column(String(255), nullable=False)
     survey_config: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    active_version: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     submissions: Mapped[list["Submission"]] = relationship(back_populates="cohort")
+    versions: Mapped[list["SurveyConfigVersion"]] = relationship(back_populates="cohort", order_by="SurveyConfigVersion.created_at.desc()")
 
 
 class Submission(Base):
@@ -49,6 +51,7 @@ class Submission(Base):
     status: Mapped[str] = mapped_column(String(20), default=SubmissionStatus.started.value)
     time_to_complete_sec: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     consent_version: Mapped[str] = mapped_column(String(20), default="1.0")
+    survey_version: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     client_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     cohort: Mapped["Cohort"] = relationship(back_populates="submissions")
@@ -93,3 +96,17 @@ class Extraction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     submission: Mapped["Submission"] = relationship(back_populates="extraction")
+
+
+class SurveyConfigVersion(Base):
+    __tablename__ = "survey_config_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    cohort_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("cohorts.id"), nullable=False)
+    version_label: Mapped[str] = mapped_column(String(20), nullable=False)
+    config: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    change_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(50), default="editor")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    cohort: Mapped["Cohort"] = relationship(back_populates="versions")

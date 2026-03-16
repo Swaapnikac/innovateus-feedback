@@ -29,6 +29,13 @@ export interface SurveyQuestion {
     operator: string;
     value: string;
   };
+  group?: string;
+}
+
+export interface QuestionGroup {
+  id: string;
+  label: string;
+  randomize: boolean;
 }
 
 export interface SurveyConfig {
@@ -37,7 +44,20 @@ export interface SurveyConfig {
     version: string;
     title: string;
     questions: SurveyQuestion[];
+    question_groups?: QuestionGroup[];
   };
+  active_version?: string | null;
+}
+
+export interface SurveyVersionSummary {
+  version_label: string;
+  change_summary: string | null;
+  created_at: string;
+  created_by: string;
+}
+
+export interface SurveyVersionDetail extends SurveyVersionSummary {
+  config: Record<string, unknown>;
 }
 
 export interface VaguenessResult {
@@ -63,7 +83,7 @@ export interface ExtractionResult {
 
 export const api = {
   getSurvey: (cohortId: string) =>
-    request<SurveyConfig>(`/v1/survey/${cohortId}`),
+    request<SurveyConfig>(`/v1/survey/${cohortId}?_t=${Date.now()}`, { cache: "no-store" }),
 
   startSubmission: (cohortId: string, consentVersion = "1.0") =>
     request<{ submission_id: string }>("/v1/submissions/start", {
@@ -141,11 +161,12 @@ export const api = {
       body: JSON.stringify({ password }),
     }),
 
-  getMetrics: (params?: { cohort_id?: string; start?: string; end?: string }) => {
+  getMetrics: (params?: { cohort_id?: string; start?: string; end?: string; survey_version?: string }) => {
     const query = new URLSearchParams();
     if (params?.cohort_id) query.set("cohort_id", params.cohort_id);
     if (params?.start) query.set("start", params.start);
     if (params?.end) query.set("end", params.end);
+    if (params?.survey_version) query.set("survey_version", params.survey_version);
     return request<{
       total_submissions: number;
       completed_submissions: number;
@@ -161,6 +182,7 @@ export const api = {
     cohort_id?: string;
     start?: string;
     end?: string;
+    survey_version?: string;
     page?: number;
     page_size?: number;
   }) => {
@@ -168,6 +190,7 @@ export const api = {
     if (params?.cohort_id) query.set("cohort_id", params.cohort_id);
     if (params?.start) query.set("start", params.start);
     if (params?.end) query.set("end", params.end);
+    if (params?.survey_version) query.set("survey_version", params.survey_version);
     if (params?.page) query.set("page", String(params.page));
     if (params?.page_size) query.set("page_size", String(params.page_size));
     return request<{
@@ -178,6 +201,7 @@ export const api = {
         completed_at: string | null;
         status: string;
         time_to_complete_sec: number | null;
+        survey_version: string | null;
         answers: Array<Record<string, unknown>>;
         extraction: ExtractionResult | null;
       }>;
@@ -201,11 +225,25 @@ export const api = {
   getEditorSurvey: (cohortId: string) =>
     request<SurveyConfig>(`/v1/admin/editor/survey/${cohortId}`),
 
-  saveEditorSurvey: (cohortId: string, config: { version: string; title: string; questions: SurveyQuestion[] }) =>
-    request<{ status: string; cohort_id: string }>(`/v1/admin/editor/survey/${cohortId}`, {
+  saveEditorSurvey: (cohortId: string, config: { version: string; title: string; questions: SurveyQuestion[]; question_groups?: QuestionGroup[] }) =>
+    request<{ status: string; cohort_id: string; version_label?: string; change_summary?: string }>(`/v1/admin/editor/survey/${cohortId}`, {
       method: "PUT",
       body: JSON.stringify(config),
     }),
+
+  getVersionHistory: (cohortId: string) =>
+    request<{ items: SurveyVersionSummary[]; total: number; active_version: string | null }>(
+      `/v1/admin/editor/survey/${cohortId}/versions`
+    ),
+
+  getVersion: (cohortId: string, versionLabel: string) =>
+    request<SurveyVersionDetail>(`/v1/admin/editor/survey/${cohortId}/versions/${versionLabel}`),
+
+  restoreVersion: (cohortId: string, versionLabel: string) =>
+    request<{ status: string; cohort_id: string; version_label: string; restored_from: string }>(
+      `/v1/admin/editor/survey/${cohortId}/versions/${versionLabel}/restore`,
+      { method: "POST" }
+    ),
 
   exportUrl: (type: "raw.csv" | "structured.csv" | "summary.pdf" | "summary.pptx", params?: {
     cohort_id?: string; start?: string; end?: string;

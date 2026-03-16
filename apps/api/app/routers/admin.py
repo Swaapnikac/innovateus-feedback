@@ -60,6 +60,7 @@ async def get_metrics(
     cohort_id: Optional[uuid.UUID] = None,
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
+    survey_version: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
     base_query = select(Submission)
@@ -69,6 +70,8 @@ async def get_metrics(
         base_query = base_query.where(Submission.created_at >= start)
     if end:
         base_query = base_query.where(Submission.created_at <= end)
+    if survey_version:
+        base_query = base_query.where(Submission.survey_version == survey_version)
 
     result = await db.execute(base_query)
     submissions = result.scalars().all()
@@ -131,6 +134,7 @@ async def get_responses(
     cohort_id: Optional[uuid.UUID] = None,
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
+    survey_version: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -147,6 +151,9 @@ async def get_responses(
     if end:
         query = query.where(Submission.created_at <= end)
         count_query = count_query.where(Submission.created_at <= end)
+    if survey_version:
+        query = query.where(Submission.survey_version == survey_version)
+        count_query = count_query.where(Submission.survey_version == survey_version)
 
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
@@ -173,6 +180,7 @@ async def get_responses(
                 completed_at=sub.completed_at,
                 status=sub.status,
                 time_to_complete_sec=sub.time_to_complete_sec,
+                survey_version=sub.survey_version,
                 answers=[
                     {
                         "question_id": a.question_id,

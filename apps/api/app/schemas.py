@@ -13,12 +13,20 @@ class SurveyQuestion(BaseModel):
     required: bool = True
     voice_eligible: bool = False
     condition: Optional[dict] = None
+    group: Optional[str] = None
+
+
+class QuestionGroup(BaseModel):
+    id: str
+    label: str
+    randomize: bool = False
 
 
 class SurveyConfig(BaseModel):
     version: str
     title: str
     questions: list[SurveyQuestion]
+    question_groups: list[QuestionGroup] = []
 
 
 class StartSubmissionRequest(BaseModel):
@@ -116,6 +124,7 @@ class SubmissionSummary(BaseModel):
     completed_at: Optional[datetime] = None
     status: str
     time_to_complete_sec: Optional[int] = None
+    survey_version: Optional[str] = None
     answers: list[dict] = []
     extraction: Optional[dict] = None
 
@@ -146,3 +155,17 @@ class SaveSurveyRequest(BaseModel):
     version: str = "1.0"
     title: str
     questions: list[SurveyQuestion]
+    question_groups: list[QuestionGroup] = []
+
+
+class SurveyVersionSummary(BaseModel):
+    version_label: str
+    change_summary: Optional[str] = None
+    created_at: datetime
+    created_by: str
+
+    model_config = {"from_attributes": True}
+
+
+class SurveyVersionDetail(SurveyVersionSummary):
+    config: dict

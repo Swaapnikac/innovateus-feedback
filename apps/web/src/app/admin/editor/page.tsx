@@ -27,9 +27,13 @@ import {
   GripVertical,
   ChevronRight,
   X,
+  Shuffle,
+  History,
+  RotateCcw,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { InnovateLogo } from "@/components/InnovateLogo";
-import { api, type SurveyQuestion } from "@/lib/api";
+import { api, type SurveyQuestion, type QuestionGroup, type SurveyVersionSummary } from "@/lib/api";
 
 const QUESTION_TYPES = [
   { value: "rating", label: "Rating (scale)" },
@@ -53,6 +57,7 @@ interface QuestionEditorProps {
   index: number;
   total: number;
   allQuestions: SurveyQuestion[];
+  availableGroups: QuestionGroup[];
   onChange: (updated: SurveyQuestion) => void;
   onDelete: () => void;
   onMoveUp: () => void;
@@ -64,6 +69,7 @@ function QuestionEditor({
   index,
   total,
   allQuestions,
+  availableGroups,
   onChange,
   onDelete,
   onMoveUp,
@@ -106,6 +112,11 @@ function QuestionEditor({
         <span className="text-sm font-medium text-brand-blue truncate flex-1">
           {question.text || "(untitled question)"}
         </span>
+        {question.group && (
+          <span className="text-xs bg-brand-teal/15 text-brand-teal px-2 py-0.5 rounded-full shrink-0">
+            {availableGroups.find((g) => g.id === question.group)?.label || question.group}
+          </span>
+        )}
         <span className="text-xs bg-brand-light-blue/60 text-brand-blue/60 px-2 py-0.5 rounded-full shrink-0">
           {question.type}
         </span>
@@ -118,7 +129,7 @@ function QuestionEditor({
 
       {expanded && (
         <CardContent className="pt-0 pb-4 space-y-4 border-t">
-          <div className="grid grid-cols-2 gap-4 pt-4">
+          <div className="grid grid-cols-3 gap-4 pt-4">
             <div className="space-y-1.5">
               <Label className="text-xs text-brand-blue/50">Question ID</Label>
               <Input
@@ -143,6 +154,27 @@ function QuestionEditor({
                   {QUESTION_TYPES.map((t) => (
                     <SelectItem key={t.value} value={t.value}>
                       {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-brand-blue/50">Group</Label>
+              <Select
+                value={question.group || "__none__"}
+                onValueChange={(v) =>
+                  updateField("group", v === "__none__" ? undefined : v)
+                }
+              >
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue placeholder="No group" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">No group</SelectItem>
+                  {availableGroups.map((g) => (
+                    <SelectItem key={g.id} value={g.id}>
+                      {g.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -361,9 +393,26 @@ export default function EditorPage() {
   const [selectedCohort, setSelectedCohort] = useState("");
   const [title, setTitle] = useState("Post-Course Survey");
   const [questions, setQuestions] = useState<SurveyQuestion[]>([]);
+  const [questionGroups, setQuestionGroups] = useState<QuestionGroup[]>([]);
+  const [activeVersion, setActiveVersion] = useState<string | null>(null);
+  const [versionHistory, setVersionHistory] = useState<SurveyVersionSummary[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
+
+  const loadVersionHistory = useCallback(
+    async (cohortId: string) => {
+      try {
+        const history = await api.getVersionHistory(cohortId);
+        setVersionHistory(history.items);
+        setActiveVersion(history.active_version);
+      } catch {
+        setVersionHistory([]);
+      }
+    },
+    []
+  );
 
   const loadSurvey = useCallback(
     async (cohortId: string) => {
@@ -372,11 +421,14 @@ export default function EditorPage() {
         const data = await api.getEditorSurvey(cohortId);
         setTitle(data.survey.title);
         setQuestions(data.survey.questions);
+        setQuestionGroups(data.survey.question_groups || []);
+        setActiveVersion(data.active_version ?? null);
+        loadVersionHistory(cohortId);
       } catch {
         router.push("/admin/editor/login");
       }
     },
-    [router]
+    [router, loadVersionHistory]
   );
 
   useEffect(() => {
@@ -403,19 +455,42 @@ export default function EditorPage() {
     setSaving(true);
     setSaveMessage("");
     try {
-      await api.saveEditorSurvey(selectedCohort, {
+      const result = await api.saveEditorSurvey(selectedCohort, {
         version: "1.0",
         title,
         questions,
+        question_groups: questionGroups,
       });
-      setSaveMessage("Survey saved successfully");
-      setTimeout(() => setSaveMessage(""), 3000);
+      if (result.status === "no_changes") {
+        setSaveMessage("No changes detected");
+      } else {
+        setSaveMessage(`Saved as ${result.version_label}`);
+        setActiveVersion(result.version_label ?? activeVersion);
+        loadVersionHistory(selectedCohort);
+      }
+      setTimeout(() => setSaveMessage(""), 4000);
     } catch (err) {
       setSaveMessage(
         err instanceof Error ? err.message : "Failed to save survey"
       );
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRestore = async (versionLabel: string) => {
+    if (!selectedCohort) return;
+    if (!confirm(`Restore survey to ${versionLabel}? This will create a new version.`)) return;
+    try {
+      const result = await api.restoreVersion(selectedCohort, versionLabel);
+      setActiveVersion(result.version_label);
+      setSaveMessage(`Restored from ${versionLabel} as ${result.version_label}`);
+      await loadSurvey(selectedCohort);
+      setTimeout(() => setSaveMessage(""), 4000);
+    } catch (err) {
+      setSaveMessage(
+        err instanceof Error ? err.message : "Failed to restore"
+      );
     }
   };
 
@@ -509,6 +584,102 @@ export default function EditorPage() {
           </CardContent>
         </Card>
 
+        <Card className="bg-white border-0 shadow-sm rounded-2xl">
+          <CardContent className="pt-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Shuffle className="h-4 w-4 text-brand-blue/50" />
+                <Label className="text-xs font-semibold text-brand-blue/40 uppercase tracking-wider">
+                  Question Groups
+                </Label>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setQuestionGroups([
+                    ...questionGroups,
+                    { id: `group_${Date.now()}`, label: "", randomize: false },
+                  ])
+                }
+                className="gap-1 text-xs rounded-full"
+              >
+                <Plus className="h-3 w-3" /> Add Group
+              </Button>
+            </div>
+            {questionGroups.length === 0 && (
+              <p className="text-xs text-brand-blue/30">
+                No groups defined. Questions will be served in their authored
+                order. Add groups to enable within-group randomization.
+              </p>
+            )}
+            {questionGroups.map((g, gi) => (
+              <div
+                key={g.id}
+                className="flex items-center gap-3 bg-gray-50/80 rounded-lg px-3 py-2"
+              >
+                <Input
+                  value={g.id}
+                  onChange={(e) => {
+                    const oldId = g.id;
+                    const next = [...questionGroups];
+                    next[gi] = { ...g, id: e.target.value };
+                    setQuestionGroups(next);
+                    setQuestions(
+                      questions.map((q) =>
+                        q.group === oldId ? { ...q, group: e.target.value } : q
+                      )
+                    );
+                  }}
+                  className="h-8 text-xs font-mono w-28"
+                  placeholder="group_id"
+                />
+                <Input
+                  value={g.label}
+                  onChange={(e) => {
+                    const next = [...questionGroups];
+                    next[gi] = { ...g, label: e.target.value };
+                    setQuestionGroups(next);
+                  }}
+                  className="h-8 text-sm flex-1"
+                  placeholder="Group label"
+                />
+                <label className="flex items-center gap-1.5 cursor-pointer shrink-0">
+                  <Switch
+                    checked={g.randomize}
+                    onCheckedChange={(v) => {
+                      const next = [...questionGroups];
+                      next[gi] = { ...g, randomize: v };
+                      setQuestionGroups(next);
+                    }}
+                  />
+                  <span className="text-xs text-brand-blue/60">Randomize</span>
+                </label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    const removedId = questionGroups[gi].id;
+                    setQuestionGroups(
+                      questionGroups.filter((_, i) => i !== gi)
+                    );
+                    setQuestions(
+                      questions.map((q) =>
+                        q.group === removedId ? { ...q, group: undefined } : q
+                      )
+                    );
+                  }}
+                  className="h-8 w-8 p-0 text-brand-red/60 hover:text-brand-red shrink-0"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium text-brand-blue">
             Questions ({questions.length})
@@ -530,6 +701,7 @@ export default function EditorPage() {
               index={i}
               total={questions.length}
               allQuestions={questions}
+              availableGroups={questionGroups}
               onChange={(updated) => updateQuestion(i, updated)}
               onDelete={() => deleteQuestion(i)}
               onMoveUp={() => moveQuestion(i, i - 1)}
@@ -561,18 +733,97 @@ export default function EditorPage() {
             )}
             {saving ? "Saving..." : "Save Survey"}
           </Button>
+          {activeVersion && (
+            <Badge variant="outline" className="text-xs font-mono border-brand-blue/20 text-brand-blue/60">
+              {activeVersion}
+            </Badge>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowHistory(!showHistory)}
+            className="gap-1.5 text-xs text-brand-blue/50 hover:text-brand-blue"
+          >
+            <History className="h-3.5 w-3.5" />
+            History
+          </Button>
           {saveMessage && (
             <span
               className={`text-sm ${
-                saveMessage.includes("success")
+                saveMessage.includes("Saved") || saveMessage.includes("Restored")
                   ? "text-brand-teal"
-                  : "text-brand-red"
+                  : saveMessage.includes("No changes")
+                    ? "text-brand-blue/50"
+                    : "text-brand-red"
               }`}
             >
               {saveMessage}
             </span>
           )}
         </div>
+
+        {showHistory && (
+          <Card className="bg-white border-0 shadow-sm rounded-2xl">
+            <CardContent className="pt-6 space-y-3">
+              <div className="flex items-center gap-2 mb-2">
+                <History className="h-4 w-4 text-brand-blue/50" />
+                <Label className="text-xs font-semibold text-brand-blue/40 uppercase tracking-wider">
+                  Version History
+                </Label>
+              </div>
+              {versionHistory.length === 0 && (
+                <p className="text-xs text-brand-blue/30">No versions saved yet.</p>
+              )}
+              {versionHistory.map((v) => (
+                <div
+                  key={v.version_label}
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2.5 ${
+                    v.version_label === activeVersion
+                      ? "bg-brand-teal/5 border border-brand-teal/20"
+                      : "bg-gray-50/80"
+                  }`}
+                >
+                  <Badge
+                    variant={v.version_label === activeVersion ? "default" : "outline"}
+                    className={`text-xs font-mono shrink-0 ${
+                      v.version_label === activeVersion
+                        ? "bg-brand-teal text-white"
+                        : "border-brand-blue/20 text-brand-blue/50"
+                    }`}
+                  >
+                    {v.version_label}
+                  </Badge>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-brand-blue/70 truncate">
+                      {v.change_summary || "No description"}
+                    </p>
+                    <p className="text-[10px] text-brand-blue/30">
+                      {new Date(v.created_at).toLocaleString()} by {v.created_by}
+                    </p>
+                  </div>
+                  {v.version_label !== activeVersion && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRestore(v.version_label)}
+                      className="gap-1 text-xs text-brand-blue/40 hover:text-brand-blue shrink-0"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      Restore
+                    </Button>
+                  )}
+                  {v.version_label === activeVersion && (
+                    <span className="text-[10px] font-medium text-brand-teal uppercase tracking-wider shrink-0">
+                      Current
+                    </span>
+                  )}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
       </main>
     </div>
   );

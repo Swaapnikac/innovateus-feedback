@@ -49,6 +49,7 @@ interface ResponseItem {
   completed_at: string | null;
   status: string;
   time_to_complete_sec: number | null;
+  survey_version: string | null;
   answers: Array<Record<string, unknown>>;
   extraction: ExtractionResult | null;
 }
@@ -80,6 +81,7 @@ export default function DashboardPage() {
   const [selectedCohort, setSelectedCohort] = useState<string>("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [versionFilter, setVersionFilter] = useState<string>("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
 
@@ -89,6 +91,7 @@ export default function DashboardPage() {
         cohort_id: selectedCohort || undefined,
         start: startDate || undefined,
         end: endDate || undefined,
+        survey_version: versionFilter || undefined,
       };
 
       const [metricsData, responsesData] = await Promise.all([
@@ -103,7 +106,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedCohort, startDate, endDate, page, router]);
+  }, [selectedCohort, startDate, endDate, versionFilter, page, router]);
 
   useEffect(() => {
     api.getCohorts().then(setCohorts).catch(() => {});
@@ -199,6 +202,15 @@ export default function DashboardPage() {
               <div className="space-y-1">
                 <Label className="text-xs">End Date</Label>
                 <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-40" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-brand-blue/40 uppercase tracking-wider">Version</Label>
+                <Input
+                  value={versionFilter}
+                  onChange={(e) => setVersionFilter(e.target.value)}
+                  className="w-28 rounded-xl"
+                  placeholder="e.g. v2"
+                />
               </div>
               <Button onClick={() => { setPage(1); loadData(); }} className="bg-brand-blue hover:bg-brand-blue/90 rounded-full px-6">
                 Apply Filters
@@ -382,6 +394,7 @@ export default function DashboardPage() {
                   <TableRow>
                     <TableHead>Date</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Version</TableHead>
                     <TableHead>Time</TableHead>
                     <TableHead>Recommend</TableHead>
                     <TableHead>Planned Workflow</TableHead>
@@ -404,6 +417,15 @@ export default function DashboardPage() {
                           >
                             {item.status}
                           </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {item.survey_version ? (
+                            <Badge variant="outline" className="text-xs font-mono border-brand-blue/20 text-brand-blue/50">
+                              {item.survey_version}
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-brand-blue/20">—</span>
+                          )}
                         </TableCell>
                         <TableCell className="text-xs">
                           {item.time_to_complete_sec

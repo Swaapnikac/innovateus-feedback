@@ -1,6 +1,10 @@
 {
   "version": "1.0",
   "title": "Post-Course Survey",
+  "question_groups": [
+    { "id": "closed", "label": "Closed-ended questions", "randomize": true },
+    { "id": "open", "label": "Open-ended questions", "randomize": true }
+  ],
   "questions": [
     {
       "id": "q1_recommend",
@@ -9,7 +13,8 @@
       "description": "Please choose one number, where 1 means you are extremely unlikely to recommend the course and 10 means you are extremely likely to recommend it.",
       "options": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
       "required": false,
-      "voice_eligible": false
+      "voice_eligible": false,
+      "group": "closed"
     },
     {
       "id": "q2_confidence",
@@ -23,7 +28,8 @@
         "I am not using generative AI yet"
       ],
       "required": false,
-      "voice_eligible": false
+      "voice_eligible": false,
+      "group": "closed"
     },
     {
       "id": "q3_clarity",
@@ -31,7 +37,8 @@
       "text": "As a result of this course, are you clearer about what not to do when using generative AI in your work?",
       "options": ["Yes", "Somewhat", "No", "Still unsure"],
       "required": false,
-      "voice_eligible": false
+      "voice_eligible": false,
+      "group": "closed"
     },
     {
       "id": "q4_likely_uses",
@@ -50,7 +57,8 @@
         "Write or analyze computer code"
       ],
       "required": false,
-      "voice_eligible": false
+      "voice_eligible": false,
+      "group": "closed"
     },
     {
       "id": "q5_impact",
@@ -58,26 +66,8 @@
       "text": "Whether or not you currently use generative AI in your work, do you think generative AI could make your work easier, harder, or neither?",
       "options": ["Easier", "Harder", "Neither", "Do not know"],
       "required": false,
-      "voice_eligible": false
-    },
-    {
-      "id": "q6_most_impactful",
-      "type": "open",
-      "text": "What is your most impactful use of Generative AI now? Please describe one example.",
-      "required": false,
-      "voice_eligible": true,
-      "condition": {
-        "question_id": "q2_confidence",
-        "operator": "not_equals",
-        "value": "I am not using generative AI yet"
-      }
-    },
-    {
-      "id": "q7_prepared_task",
-      "type": "open",
-      "text": "As a result of this course, what is one specific task or workflow you now feel better prepared to do with the help of GenAI?",
-      "required": false,
-      "voice_eligible": true
+      "voice_eligible": false,
+      "group": "closed"
     },
     {
       "id": "q8_exercises",
@@ -92,14 +82,37 @@
         "Yes, I completed all of the exercises"
       ],
       "required": false,
-      "voice_eligible": false
+      "voice_eligible": false,
+      "group": "closed"
+    },
+    {
+      "id": "q6_most_impactful",
+      "type": "open",
+      "text": "What is your most impactful use of Generative AI now? Please describe one example.",
+      "required": false,
+      "voice_eligible": true,
+      "group": "open",
+      "condition": {
+        "question_id": "q2_confidence",
+        "operator": "not_equals",
+        "value": "I am not using generative AI yet"
+      }
+    },
+    {
+      "id": "q7_prepared_task",
+      "type": "open",
+      "text": "As a result of this course, what is one specific task or workflow you now feel better prepared to do with the help of GenAI?",
+      "required": false,
+      "voice_eligible": true,
+      "group": "open"
     },
     {
       "id": "q9_feedback",
       "type": "open",
       "text": "Please tell us anything you would like us to know about this course. We especially welcome feedback that will help us improve it for future learners.",
       "required": false,
-      "voice_eligible": true
+      "voice_eligible": true,
+      "group": "open"
     }
   ]
 }
