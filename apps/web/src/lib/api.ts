@@ -202,6 +202,7 @@ export const api = {
         status: string;
         time_to_complete_sec: number | null;
         survey_version: string | null;
+        ip_hash: string | null;
         answers: Array<Record<string, unknown>>;
         extraction: ExtractionResult | null;
       }>;
@@ -212,9 +213,21 @@ export const api = {
   },
 
   getCohorts: () =>
-    request<Array<{ id: string; name: string; course_name: string; created_at: string }>>(
+    request<Array<{ id: string; name: string; course_name: string; max_submissions_per_ip: number; created_at: string }>>(
       "/v1/admin/cohorts"
     ),
+
+  createCohort: (name: string, courseName: string) =>
+    request<{ id: string; name: string; course_name: string; max_submissions_per_ip: number; created_at: string }>("/v1/admin/cohorts", {
+      method: "POST",
+      body: JSON.stringify({ name, course_name: courseName }),
+    }),
+
+  updateCohortSettings: (cohortId: string, settings: { max_submissions_per_ip: number }) =>
+    request<{ status: string; max_submissions_per_ip: number }>(`/v1/admin/cohorts/${cohortId}/settings`, {
+      method: "POST",
+      body: JSON.stringify(settings),
+    }),
 
   editorLogin: (password: string) =>
     request<{ token: string }>("/v1/admin/editor/login", {

@@ -23,6 +23,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
   Users,
   CheckCircle2,
   Clock,
@@ -38,6 +45,9 @@ import {
   BarChart3,
   TrendingUp,
   Settings,
+  Plus,
+  Copy,
+  Link2,
 } from "lucide-react";
 import { api, type ExtractionResult } from "@/lib/api";
 import { InnovateLogo } from "@/components/InnovateLogo";
@@ -50,6 +60,7 @@ interface ResponseItem {
   status: string;
   time_to_complete_sec: number | null;
   survey_version: string | null;
+  ip_hash: string | null;
   answers: Array<Record<string, unknown>>;
   extraction: ExtractionResult | null;
 }
@@ -84,11 +95,18 @@ export default function DashboardPage() {
   const [versionFilter, setVersionFilter] = useState<string>("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [showNewProgram, setShowNewProgram] = useState(false);
+  const [newProgramName, setNewProgramName] = useState("");
+  const [newCourseName, setNewCourseName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createdCohortId, setCreatedCohortId] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
+      const cohortId = selectedCohort && selectedCohort !== "all" ? selectedCohort : undefined;
       const params = {
-        cohort_id: selectedCohort || undefined,
+        cohort_id: cohortId,
         start: startDate || undefined,
         end: endDate || undefined,
         survey_version: versionFilter || undefined,
@@ -114,8 +132,9 @@ export default function DashboardPage() {
   }, [loadData]);
 
   const handleExport = (type: "raw.csv" | "structured.csv" | "summary.pdf" | "summary.pptx") => {
+    const exportCohortId = selectedCohort && selectedCohort !== "all" ? selectedCohort : undefined;
     const url = api.exportUrl(type, {
-      cohort_id: selectedCohort || undefined,
+      cohort_id: exportCohortId,
       start: startDate || undefined,
       end: endDate || undefined,
     });
@@ -125,6 +144,39 @@ export default function DashboardPage() {
   const handleLogout = () => {
     localStorage.removeItem("admin_token");
     router.push("/admin/login");
+  };
+
+  const getSurveyLink = (cohortId: string) =>
+    `${window.location.origin}/c/${cohortId}`;
+
+  const copyLink = (cohortId: string) => {
+    navigator.clipboard.writeText(getSurveyLink(cohortId));
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  };
+
+  const handleCreateProgram = async () => {
+    if (!newProgramName.trim() || !newCourseName.trim()) return;
+    setCreating(true);
+    try {
+      const created = await api.createCohort(newProgramName.trim(), newCourseName.trim());
+      setCohorts((prev) => [created, ...prev]);
+      setSelectedCohort(created.id);
+      setCreatedCohortId(created.id);
+      setNewProgramName("");
+      setNewCourseName("");
+      loadData();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to create program");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const closeNewProgramDialog = () => {
+    setShowNewProgram(false);
+    setCreatedCohortId(null);
+    setLinkCopied(false);
   };
 
   const allThemes: Record<string, number> = {};
@@ -148,6 +200,13 @@ export default function DashboardPage() {
   const topThemes = Object.entries(allThemes).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const topBarriers = Object.entries(allBarriers).sort((a, b) => b[1] - a[1]).slice(0, 6);
 
+  const ipHashCounts: Record<string, number> = {};
+  responses?.items.forEach((item) => {
+    if (item.ip_hash) {
+      ipHashCounts[item.ip_hash] = (ipHashCounts[item.ip_hash] || 0) + 1;
+    }
+  });
+
   if (loading) {
     return (
       <div className="min-h-screen bg-brand-light-blue/40 flex items-center justify-center">
@@ -165,6 +224,10 @@ export default function DashboardPage() {
           <span className="text-xs font-semibold text-[#124D8F]/40 uppercase tracking-widest">Dashboard</span>
         </div>
         <div className="flex items-center gap-2">
+          <Button size="sm" onClick={() => setShowNewProgram(true)} className="rounded-full bg-brand-blue hover:bg-brand-blue/90 gap-2">
+            <Plus className="h-4 w-4" />
+            New Program
+          </Button>
           <Button variant="outline" size="sm" onClick={() => router.push("/admin/editor/login")} className="rounded-full border-brand-dark-yellow/20 text-brand-dark-yellow hover:bg-brand-yellow/10 gap-2">
             <Settings className="h-4 w-4" />
             Survey Editor
@@ -195,6 +258,20 @@ export default function DashboardPage() {
                   </SelectContent>
                 </Select>
               </div>
+              {selectedCohort && selectedCohort !== "all" && (
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-brand-blue/40 uppercase tracking-wider">Survey Link</Label>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl gap-2 text-xs h-10 w-full"
+                    onClick={() => copyLink(selectedCohort)}
+                  >
+                    <Link2 className="h-3.5 w-3.5" />
+                    {linkCopied ? "Copied!" : "Copy Survey Link"}
+                  </Button>
+                </div>
+              )}
               <div className="space-y-1">
                 <Label className="text-xs">Start Date</Label>
                 <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-40" />
@@ -395,6 +472,7 @@ export default function DashboardPage() {
                     <TableHead>Date</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Version</TableHead>
+                    <TableHead></TableHead>
                     <TableHead>Time</TableHead>
                     <TableHead>Recommend</TableHead>
                     <TableHead>Planned Workflow</TableHead>
@@ -425,6 +503,13 @@ export default function DashboardPage() {
                             </Badge>
                           ) : (
                             <span className="text-xs text-brand-blue/20">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {item.ip_hash && ipHashCounts[item.ip_hash] > 1 && (
+                            <Badge variant="outline" className="text-[10px] border-red-300 text-red-500 bg-red-50">
+                              Dup IP
+                            </Badge>
                           )}
                         </TableCell>
                         <TableCell className="text-xs">
@@ -473,6 +558,97 @@ export default function DashboardPage() {
           </Card>
         )}
       </main>
+
+      <Dialog open={showNewProgram} onOpenChange={closeNewProgramDialog}>
+        <DialogContent className="sm:max-w-md">
+          {createdCohortId ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Program Created</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <p className="text-sm text-brand-blue/60">
+                  Share this link with participants to collect feedback:
+                </p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    readOnly
+                    value={getSurveyLink(createdCohortId)}
+                    className="rounded-xl text-xs font-mono"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="rounded-xl shrink-0 gap-1.5"
+                    onClick={() => copyLink(createdCohortId)}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    {linkCopied ? "Copied!" : "Copy"}
+                  </Button>
+                </div>
+                <p className="text-[11px] text-brand-blue/30">
+                  You can customize the survey questions in the Survey Editor.
+                </p>
+              </div>
+              <DialogFooter>
+                <Button
+                  onClick={closeNewProgramDialog}
+                  className="rounded-full bg-brand-blue hover:bg-brand-blue/90"
+                >
+                  Done
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle>Create New Program</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-brand-blue/40 uppercase tracking-wider">
+                    Program Name
+                  </Label>
+                  <Input
+                    placeholder="e.g. Spring 2026 Cohort"
+                    value={newProgramName}
+                    onChange={(e) => setNewProgramName(e.target.value)}
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-brand-blue/40 uppercase tracking-wider">
+                    Course Name
+                  </Label>
+                  <Input
+                    placeholder="e.g. Introduction to Generative AI"
+                    value={newCourseName}
+                    onChange={(e) => setNewCourseName(e.target.value)}
+                    className="rounded-xl"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={closeNewProgramDialog}
+                  className="rounded-full"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleCreateProgram}
+                  disabled={creating || !newProgramName.trim() || !newCourseName.trim()}
+                  className="rounded-full bg-brand-blue hover:bg-brand-blue/90 gap-2"
+                >
+                  {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  Create
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

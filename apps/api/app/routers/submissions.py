@@ -1,9 +1,10 @@
 import uuid
+import hashlib
 import logging
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from app.db import get_db
 from app.models import Submission, Answer, Extraction, Cohort
 from app.schemas import (
@@ -14,26 +15,74 @@ from app.schemas import (
     CompleteSubmissionResponse,
 )
 from app.services.ai_service import extract_structured
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
+def _get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
+def _hash_ip(ip: str) -> str:
+    salt = get_settings().jwt_secret
+    return hashlib.sha256(f"{salt}:{ip}".encode()).hexdigest()
+
+
 @router.post("/submissions/start", response_model=StartSubmissionResponse)
-async def start_submission(req: StartSubmissionRequest, db: AsyncSession = Depends(get_db)):
+async def start_submission(
+    req: StartSubmissionRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
     cohort = await db.get(Cohort, req.cohort_id)
     if not cohort:
         raise HTTPException(status_code=404, detail="Cohort not found")
+
+    client_ip = _get_client_ip(request)
+    ip_hash = _hash_ip(client_ip)
+    limit = cohort.max_submissions_per_ip
+
+    if limit > 0:
+        cookie_name = f"submitted_{req.cohort_id}"
+        if request.cookies.get(cookie_name):
+            raise HTTPException(
+                status_code=429,
+                detail="You have already submitted feedback for this course.",
+            )
+
+        result = await db.execute(
+            select(func.count(Submission.id)).where(
+                Submission.cohort_id == req.cohort_id,
+                Submission.ip_hash == ip_hash,
+                Submission.status == "completed",
+            )
+        )
+        completed_count = result.scalar() or 0
+
+        if completed_count >= limit:
+            raise HTTPException(
+                status_code=429,
+                detail="You have already submitted feedback for this course.",
+            )
 
     submission = Submission(
         cohort_id=req.cohort_id,
         consent_version=req.consent_version,
         survey_version=cohort.active_version,
+        ip_hash=ip_hash,
         client_metadata=req.client_metadata,
     )
     db.add(submission)
     await db.flush()
+
     return StartSubmissionResponse(submission_id=submission.id)
 
 
@@ -66,7 +115,11 @@ async def save_answer(
 
 
 @router.post("/submissions/{submission_id}/complete", response_model=CompleteSubmissionResponse)
-async def complete_submission(submission_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def complete_submission(
+    submission_id: uuid.UUID,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
     submission = await db.get(Submission, submission_id)
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
@@ -124,4 +177,17 @@ async def complete_submission(submission_id: uuid.UUID, db: AsyncSession = Depen
         submission.time_to_complete_sec = int((now - submission.created_at).total_seconds())
 
     await db.flush()
+
+    cohort = await db.get(Cohort, submission.cohort_id)
+    if cohort and cohort.max_submissions_per_ip > 0:
+        cookie_name = f"submitted_{submission.cohort_id}"
+        response.set_cookie(
+            key=cookie_name,
+            value="1",
+            httponly=True,
+            secure=get_settings().environment != "development",
+            samesite="lax",
+            max_age=30 * 24 * 3600,
+        )
+
     return CompleteSubmissionResponse(status="completed", extraction=extraction_data)

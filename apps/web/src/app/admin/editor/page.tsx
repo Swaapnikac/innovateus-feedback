@@ -388,10 +388,11 @@ function QuestionEditor({
 export default function EditorPage() {
   const router = useRouter();
   const [cohorts, setCohorts] = useState<
-    Array<{ id: string; name: string; course_name: string }>
+    Array<{ id: string; name: string; course_name: string; max_submissions_per_ip?: number }>
   >([]);
   const [selectedCohort, setSelectedCohort] = useState("");
   const [title, setTitle] = useState("Post-Course Survey");
+  const [maxSubmissionsPerIp, setMaxSubmissionsPerIp] = useState(1);
   const [questions, setQuestions] = useState<SurveyQuestion[]>([]);
   const [questionGroups, setQuestionGroups] = useState<QuestionGroup[]>([]);
   const [activeVersion, setActiveVersion] = useState<string | null>(null);
@@ -438,6 +439,7 @@ export default function EditorPage() {
         setCohorts(data);
         if (data.length > 0) {
           setSelectedCohort(data[0].id);
+          setMaxSubmissionsPerIp(data[0].max_submissions_per_ip ?? 1);
         }
       })
       .catch(() => router.push("/admin/editor/login"))
@@ -447,8 +449,10 @@ export default function EditorPage() {
   useEffect(() => {
     if (selectedCohort) {
       loadSurvey(selectedCohort);
+      const cohort = cohorts.find((c) => c.id === selectedCohort);
+      if (cohort) setMaxSubmissionsPerIp(cohort.max_submissions_per_ip ?? 1);
     }
-  }, [selectedCohort, loadSurvey]);
+  }, [selectedCohort, loadSurvey, cohorts]);
 
   const handleSave = async () => {
     if (!selectedCohort) return;
@@ -549,7 +553,7 @@ export default function EditorPage() {
       <main className="max-w-3xl mx-auto px-6 py-8 space-y-6">
         <Card className="bg-white border-0 shadow-sm rounded-2xl">
           <CardContent className="pt-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="space-y-1">
                 <Label className="text-xs font-semibold text-brand-blue/40 uppercase tracking-wider">
                   Cohort
@@ -579,6 +583,39 @@ export default function EditorPage() {
                   onChange={(e) => setTitle(e.target.value)}
                   className="rounded-xl"
                 />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-brand-blue/40 uppercase tracking-wider">
+                  Max Submissions / IP
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    value={maxSubmissionsPerIp}
+                    onChange={(e) => setMaxSubmissionsPerIp(Number(e.target.value) || 0)}
+                    className="rounded-xl w-20"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl text-xs shrink-0"
+                    onClick={async () => {
+                      if (!selectedCohort) return;
+                      try {
+                        await api.updateCohortSettings(selectedCohort, { max_submissions_per_ip: maxSubmissionsPerIp });
+                        setSaveMessage("Limit updated");
+                        setTimeout(() => setSaveMessage(""), 3000);
+                      } catch {
+                        setSaveMessage("Failed to update limit");
+                      }
+                    }}
+                  >
+                    Apply
+                  </Button>
+                </div>
+                <p className="text-[10px] text-brand-blue/30">0 = unlimited</p>
               </div>
             </div>
           </CardContent>

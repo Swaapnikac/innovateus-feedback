@@ -4,7 +4,6 @@ import { InnovateLogo } from "@/components/InnovateLogo";
 import {
   ArrowRight,
   Mic,
-  BarChart3,
   Shield,
   FileText,
   MessageSquare,
@@ -20,25 +19,14 @@ export default function HomePage() {
       <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-[#E4EFFC]">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <InnovateLogo size="md" />
-          <div className="flex items-center gap-3">
-            <Link href="/c/00000000-0000-0000-0000-000000000001">
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-full border-[#124D8F]/20 text-[#124D8F] hover:bg-[#E4EFFC] hidden sm:flex"
-              >
-                Take Survey
-              </Button>
-            </Link>
-            <Link href="/admin/login">
-              <Button
-                size="sm"
-                className="rounded-full bg-[#124D8F] hover:bg-[#124D8F]/90 text-white"
-              >
-                Manager Login
-              </Button>
-            </Link>
-          </div>
+          <Link href="/c/00000000-0000-0000-0000-000000000001">
+            <Button
+              size="sm"
+              className="rounded-full bg-[#124D8F] hover:bg-[#124D8F]/90 text-white"
+            >
+              Take Survey
+            </Button>
+          </Link>
         </div>
       </nav>
 
@@ -70,23 +58,12 @@ export default function HomePage() {
               speak or type, in just a few minutes.
             </p>
 
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Link href="/c/00000000-0000-0000-0000-000000000001">
-                <Button className="h-13 px-8 text-base rounded-full bg-[#124D8F] hover:bg-[#124D8F]/90 shadow-lg shadow-[#124D8F]/20 hover:shadow-xl hover:shadow-[#124D8F]/25 transition-all gap-2 w-full sm:w-auto">
-                  Start Feedback Survey
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
-              <Link href="/admin/login">
-                <Button
-                  variant="outline"
-                  className="h-13 px-8 text-base rounded-full border-[#124D8F]/15 text-[#124D8F] hover:bg-[#E4EFFC]/60 gap-2 w-full sm:w-auto"
-                >
-                  View Dashboard
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
-            </div>
+            <Link href="/c/00000000-0000-0000-0000-000000000001">
+              <Button className="h-13 px-8 text-base rounded-full bg-[#124D8F] hover:bg-[#124D8F]/90 shadow-lg shadow-[#124D8F]/20 hover:shadow-xl hover:shadow-[#124D8F]/25 transition-all gap-2 w-full sm:w-auto">
+                Start Feedback Survey
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </Link>
 
             <div className="flex items-center gap-6 text-sm text-[#124D8F]/40 pt-2">
               <span className="flex items-center gap-1.5">
@@ -139,13 +116,6 @@ export default function HomePage() {
               iconColor: "text-[#097261]",
               title: "Privacy First",
               desc: "Completely anonymous — no login required. Audio is never stored on servers; only your edited transcript is saved.",
-            },
-            {
-              icon: BarChart3,
-              color: "bg-[#FDCE3E]/15",
-              iconColor: "text-[#D09006]",
-              title: "Manager Dashboard",
-              desc: "Real-time metrics, response browsing, and top themes at a glance. Filter by cohort and date range.",
             },
             {
               icon: FileText,

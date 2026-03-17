@@ -1,4 +1,6 @@
+import json
 import uuid
+from pathlib import Path
 from typing import Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Response, Query
@@ -6,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, case
 from app.db import get_db
-from app.models import Submission, Answer, Extraction, Cohort
+from app.models import Submission, Answer, Extraction, Cohort, SurveyConfigVersion
 from app.schemas import (
     AdminLoginRequest,
     AdminLoginResponse,
@@ -14,6 +16,8 @@ from app.schemas import (
     PaginatedResponses,
     SubmissionSummary,
     CohortResponse,
+    CohortSettingsRequest,
+    CreateCohortRequest,
 )
 from app.auth import verify_password, create_access_token, require_admin
 from app.config import get_settings
@@ -53,6 +57,38 @@ async def list_cohorts(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Cohort).order_by(Cohort.created_at.desc()))
     cohorts = result.scalars().all()
     return [CohortResponse.model_validate(c) for c in cohorts]
+
+
+DEFAULT_SURVEY_PATH = Path(__file__).resolve().parents[3] / "docs" / "survey-config" / "survey-en.json"
+
+
+@router.post("/cohorts", response_model=CohortResponse, dependencies=[Depends(require_admin)])
+async def create_cohort(req: CreateCohortRequest, db: AsyncSession = Depends(get_db)):
+    default_config: dict | None = None
+    if DEFAULT_SURVEY_PATH.exists():
+        default_config = json.loads(DEFAULT_SURVEY_PATH.read_text(encoding="utf-8"))
+
+    cohort = Cohort(
+        name=req.name,
+        course_name=req.course_name,
+        survey_config=default_config,
+        active_version="v1",
+    )
+    db.add(cohort)
+    await db.flush()
+
+    if default_config:
+        version = SurveyConfigVersion(
+            cohort_id=cohort.id,
+            version_label="v1",
+            config=default_config,
+            change_summary="Initial survey configuration",
+            created_by="admin",
+        )
+        db.add(version)
+        await db.flush()
+
+    return CohortResponse.model_validate(cohort)
 
 
 @router.get("/metrics", response_model=MetricsResponse, dependencies=[Depends(require_admin)])
@@ -181,6 +217,7 @@ async def get_responses(
                 status=sub.status,
                 time_to_complete_sec=sub.time_to_complete_sec,
                 survey_version=sub.survey_version,
+                ip_hash=sub.ip_hash,
                 answers=[
                     {
                         "question_id": a.question_id,
@@ -273,3 +310,18 @@ async def export_summary_pptx(
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         headers={"Content-Disposition": "attachment; filename=summary_report.pptx"},
     )
+
+
+@router.post("/cohorts/{cohort_id}/settings", dependencies=[Depends(require_admin)])
+async def update_cohort_settings(
+    cohort_id: uuid.UUID,
+    req: CohortSettingsRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    cohort = await db.get(Cohort, cohort_id)
+    if not cohort:
+        raise HTTPException(status_code=404, detail="Cohort not found")
+
+    cohort.max_submissions_per_ip = req.max_submissions_per_ip
+    await db.flush()
+    return {"status": "updated", "max_submissions_per_ip": cohort.max_submissions_per_ip}

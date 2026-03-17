@@ -125,6 +125,7 @@ class SubmissionSummary(BaseModel):
     status: str
     time_to_complete_sec: Optional[int] = None
     survey_version: Optional[str] = None
+    ip_hash: Optional[str] = None
     answers: list[dict] = []
     extraction: Optional[dict] = None
 
@@ -142,9 +143,19 @@ class CohortResponse(BaseModel):
     id: uuid.UUID
     name: str
     course_name: str
+    max_submissions_per_ip: int = 1
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class CreateCohortRequest(BaseModel):
+    name: str
+    course_name: str
+
+
+class CohortSettingsRequest(BaseModel):
+    max_submissions_per_ip: int = 1
 
 
 class EditorLoginRequest(BaseModel):

@@ -35,6 +35,7 @@ class Cohort(Base):
     course_name: Mapped[str] = mapped_column(String(255), nullable=False)
     survey_config: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     active_version: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    max_submissions_per_ip: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     submissions: Mapped[list["Submission"]] = relationship(back_populates="cohort")
@@ -52,6 +53,7 @@ class Submission(Base):
     time_to_complete_sec: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     consent_version: Mapped[str] = mapped_column(String(20), default="1.0")
     survey_version: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    ip_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     client_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     cohort: Mapped["Cohort"] = relationship(back_populates="submissions")
