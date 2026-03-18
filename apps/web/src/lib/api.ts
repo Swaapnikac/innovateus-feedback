@@ -1,10 +1,16 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const authHeaders: Record<string, string> = {};
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("admin_token") || localStorage.getItem("editor_token");
+    if (token) authHeaders["Authorization"] = `Bearer ${token}`;
+  }
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...authHeaders,
       ...options.headers,
     },
     credentials: "include",

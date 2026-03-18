@@ -105,7 +105,7 @@ async def editor_login(req: EditorLoginRequest, response: Response):
         value=token,
         httponly=True,
         secure=settings.environment != "development",
-        samesite="lax",
+        samesite="none" if settings.environment != "development" else "lax",
         max_age=86400,
     )
     return AdminLoginResponse(token=token)
