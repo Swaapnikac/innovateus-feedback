@@ -73,6 +73,18 @@ async def start_submission(
                 detail="You have already submitted feedback for this course.",
             )
 
+    existing = await db.execute(
+        select(Submission).where(
+            Submission.cohort_id == req.cohort_id,
+            Submission.ip_hash == ip_hash,
+            Submission.status == "started",
+        ).order_by(Submission.created_at.desc()).limit(1)
+    )
+    existing_sub = existing.scalar_one_or_none()
+
+    if existing_sub:
+        return StartSubmissionResponse(submission_id=existing_sub.id)
+
     submission = Submission(
         cohort_id=req.cohort_id,
         consent_version=req.consent_version,

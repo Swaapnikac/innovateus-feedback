@@ -312,6 +312,29 @@ async def export_summary_pptx(
     )
 
 
+@router.delete("/responses", dependencies=[Depends(require_admin)])
+async def delete_all_responses(
+    cohort_id: Optional[uuid.UUID] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import delete
+
+    sub_query = select(Submission.id)
+    if cohort_id:
+        sub_query = sub_query.where(Submission.cohort_id == cohort_id)
+    sub_ids = (await db.execute(sub_query)).scalars().all()
+
+    if not sub_ids:
+        return {"status": "ok", "deleted": 0}
+
+    await db.execute(delete(Extraction).where(Extraction.submission_id.in_(sub_ids)))
+    await db.execute(delete(Answer).where(Answer.submission_id.in_(sub_ids)))
+    await db.execute(delete(Submission).where(Submission.id.in_(sub_ids)))
+    await db.flush()
+
+    return {"status": "ok", "deleted": len(sub_ids)}
+
+
 @router.post("/cohorts/{cohort_id}/settings", dependencies=[Depends(require_admin)])
 async def update_cohort_settings(
     cohort_id: uuid.UUID,

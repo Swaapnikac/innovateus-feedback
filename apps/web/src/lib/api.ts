@@ -223,6 +223,13 @@ export const api = {
       body: JSON.stringify({ name, course_name: courseName }),
     }),
 
+  deleteAllResponses: (cohortId?: string) => {
+    const query = cohortId ? `?cohort_id=${cohortId}` : "";
+    return request<{ status: string; deleted: number }>(`/v1/admin/responses${query}`, {
+      method: "DELETE",
+    });
+  },
+
   updateCohortSettings: (cohortId: string, settings: { max_submissions_per_ip: number }) =>
     request<{ status: string; max_submissions_per_ip: number }>(`/v1/admin/cohorts/${cohortId}/settings`, {
       method: "POST",

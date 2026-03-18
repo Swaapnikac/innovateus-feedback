@@ -48,6 +48,7 @@ import {
   Plus,
   Copy,
   Link2,
+  Trash2,
 } from "lucide-react";
 import { api, type ExtractionResult } from "@/lib/api";
 import { InnovateLogo } from "@/components/InnovateLogo";
@@ -170,6 +171,23 @@ export default function DashboardPage() {
       alert(err instanceof Error ? err.message : "Failed to create program");
     } finally {
       setCreating(false);
+    }
+  };
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDeleteAllResponses = async () => {
+    setDeleting(true);
+    try {
+      const cohortId = selectedCohort && selectedCohort !== "all" ? selectedCohort : undefined;
+      await api.deleteAllResponses(cohortId);
+      setShowDeleteConfirm(false);
+      loadData();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete responses");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -460,10 +478,20 @@ export default function DashboardPage() {
         {/* Responses Table */}
         {responses && (
           <Card className="bg-white border-0 shadow-sm rounded-2xl">
-            <CardHeader className="pb-3">
+            <CardHeader className="pb-3 flex flex-row items-center justify-between">
               <CardTitle className="text-sm font-medium text-brand-blue">
                 Responses ({responses.total} total)
               </CardTitle>
+              {responses.total > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 rounded-full border-red-300 text-red-600 hover:bg-red-50"
+                  onClick={() => setShowDeleteConfirm(true)}
+                >
+                  <Trash2 className="h-4 w-4" /> Delete All
+                </Button>
+              )}
             </CardHeader>
             <CardContent>
               <Table>
@@ -647,6 +675,40 @@ export default function DashboardPage() {
               </DialogFooter>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-red-600">Delete All Responses</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-brand-blue/60 py-2">
+            This will permanently delete{" "}
+            <strong>
+              {selectedCohort && selectedCohort !== "all"
+                ? `all responses for "${cohorts.find((c) => c.id === selectedCohort)?.name || "this program"}"`
+                : "all responses across every program"}
+            </strong>
+            . This action cannot be undone.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowDeleteConfirm(false)}
+              className="rounded-full"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleDeleteAllResponses}
+              disabled={deleting}
+              className="rounded-full bg-red-600 hover:bg-red-700 text-white gap-2"
+            >
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Delete All
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
