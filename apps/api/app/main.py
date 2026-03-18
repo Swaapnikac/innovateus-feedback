@@ -23,6 +23,11 @@ app.include_router(admin.router, prefix="/v1/admin", tags=["admin"])
 app.include_router(editor.router, prefix="/v1/admin", tags=["editor"])
 
 
+@app.get("/")
+async def root():
+    return {"service": "InnovateUS Feedback API", "status": "ok", "docs": "/docs"}
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
