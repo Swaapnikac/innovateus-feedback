@@ -9,7 +9,7 @@ from app.models import Cohort
 from app.db import Base
 
 DEFAULT_COHORT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
-SURVEY_CONFIG_PATH = Path(__file__).resolve().parent.parent / "docs" / "survey-config" / "survey-en.json"
+SURVEY_CONFIG_PATH = Path(__file__).resolve().parents[2] / "docs" / "survey-config" / "survey-en.json"
 
 
 def _load_default_survey() -> dict:
