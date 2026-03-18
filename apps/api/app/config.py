@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     environment: str = "development"
 
-    model_config = {"env_file": "../../.env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = {"env_file": "../../.env", "env_file_encoding": "utf-8", "extra": "ignore", "env_ignore_empty": True}
 
     @property
     def async_database_url(self) -> str:
