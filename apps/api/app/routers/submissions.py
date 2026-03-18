@@ -51,13 +51,6 @@ async def start_submission(
     limit = cohort.max_submissions_per_ip
 
     if limit > 0:
-        cookie_name = f"submitted_{req.cohort_id}"
-        if request.cookies.get(cookie_name):
-            raise HTTPException(
-                status_code=429,
-                detail="You have already submitted feedback for this course.",
-            )
-
         result = await db.execute(
             select(func.count(Submission.id)).where(
                 Submission.cohort_id == req.cohort_id,
