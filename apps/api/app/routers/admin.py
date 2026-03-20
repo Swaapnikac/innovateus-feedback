@@ -99,17 +99,18 @@ async def get_metrics(
     survey_version: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    base_query = select(Submission)
-    if cohort_id:
-        base_query = base_query.where(Submission.cohort_id == cohort_id)
-    if start:
-        base_query = base_query.where(Submission.created_at >= start)
-    if end:
-        base_query = base_query.where(Submission.created_at <= end)
-    if survey_version:
-        base_query = base_query.where(Submission.survey_version == survey_version)
+    def _apply_filters(query):
+        if cohort_id:
+            query = query.where(Submission.cohort_id == cohort_id)
+        if start:
+            query = query.where(Submission.created_at >= start)
+        if end:
+            query = query.where(Submission.created_at <= end)
+        if survey_version:
+            query = query.where(Submission.survey_version == survey_version)
+        return query
 
-    result = await db.execute(base_query)
+    result = await db.execute(_apply_filters(select(Submission)))
     submissions = result.scalars().all()
 
     total = len(submissions)
@@ -119,11 +120,9 @@ async def get_metrics(
     times = [s.time_to_complete_sec for s in completed if s.time_to_complete_sec]
     avg_time = sum(times) / len(times) if times else None
 
-    answer_query = select(Answer).join(Submission).where(
-        Answer.question_id == "q1_recommend"
+    answer_query = _apply_filters(
+        select(Answer).join(Submission).where(Answer.question_id == "q1_recommend")
     )
-    if cohort_id:
-        answer_query = answer_query.where(Submission.cohort_id == cohort_id)
     result = await db.execute(answer_query)
     recommend_answers = result.scalars().all()
     scores = []
@@ -134,11 +133,9 @@ async def get_metrics(
             pass
     avg_score = sum(scores) / len(scores) if scores else None
 
-    confidence_query = select(Answer).join(Submission).where(
-        Answer.question_id == "q2_confidence"
+    confidence_query = _apply_filters(
+        select(Answer).join(Submission).where(Answer.question_id == "q2_confidence")
     )
-    if cohort_id:
-        confidence_query = confidence_query.where(Submission.cohort_id == cohort_id)
     result = await db.execute(confidence_query)
     confidence_answers = result.scalars().all()
     conf_dist: dict[str, int] = {}
@@ -146,9 +143,9 @@ async def get_metrics(
         val = a.answer_raw or "Unknown"
         conf_dist[val] = conf_dist.get(val, 0) + 1
 
-    open_query = select(Answer).join(Submission).where(Answer.question_type == "open")
-    if cohort_id:
-        open_query = open_query.where(Submission.cohort_id == cohort_id)
+    open_query = _apply_filters(
+        select(Answer).join(Submission).where(Answer.question_type == "open")
+    )
     result = await db.execute(open_query)
     open_answers = result.scalars().all()
     vague_count = sum(1 for a in open_answers if a.is_vague is True)
