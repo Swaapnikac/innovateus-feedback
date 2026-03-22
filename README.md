@@ -4,29 +4,33 @@
 
 A privacy-first, no-login web check-in that collects InnovateUS post-course feedback using voice-to-text for open-ended questions, adds bounded AI follow-ups when responses are vague, extracts structured insights, and provides a program manager dashboard with exports.
 
+**Live Demo**: [innovateus-feedback.onrender.com](https://innovateus-feedback.onrender.com)
+
 ## Architecture
 
-- **Frontend**: Next.js 14 (App Router) + TypeScript + Tailwind CSS + shadcn/ui
-- **Backend**: FastAPI (Python) + SQLAlchemy 2.0 + Alembic
+- **Frontend**: Next.js 16 (App Router) + TypeScript + Tailwind CSS + shadcn/ui
+- **Backend**: FastAPI (Python 3.11) + SQLAlchemy 2.0 + Alembic
 - **Database**: PostgreSQL 16
 - **AI**: OpenAI GPT-4o/GPT-4o-mini (vagueness detection, follow-ups, extraction)
 - **Speech-to-Text**: OpenAI Whisper API
 - **Exports**: CSV (pandas), PDF (ReportLab), PPTX (python-pptx)
 - **i18n**: English + Spanish via next-intl
-- **Survey Versioning**: Immutable config snapshots with auto-diffing and per-response version stamps
+- **Hosting**: Render (render.yaml blueprint for one-click deploy)
 
 ## Quick Start
 
 ### Prerequisites
 
 - Node.js 20+
-- Python 3.12+
+- Python 3.11+
 - PostgreSQL 16 (or Docker)
 - OpenAI API key
 
 ### 1. Clone and configure
 
 ```bash
+git clone https://github.com/Swaapnikac/innovateus-feedback.git
+cd innovateus-feedback
 cp .env.example .env
 # Edit .env with your OpenAI API key and admin password hash
 ```
@@ -61,7 +65,7 @@ docker run -d --name innovateus-db -p 5432:5432 \
 
 ```bash
 cd apps/api
-python -m venv venv && source venv/bin/activate
+python -m venv venv && source venv/bin/activate   # Windows: .\venv\Scripts\activate
 pip install -r requirements.txt
 
 # Run migrations
@@ -89,6 +93,22 @@ npm run dev
 - **Survey Editor**: http://localhost:3000/admin/editor/login
 - **API Docs**: http://localhost:8000/docs
 
+## Deploy to Render
+
+This project includes a `render.yaml` blueprint for one-click deployment:
+
+1. Go to [render.com/deploy](https://render.com/deploy) and connect your GitHub repo
+2. Render auto-detects the blueprint and creates 3 services: PostgreSQL, backend, frontend
+3. Fill in the required secrets (`OPENAI_API_KEY`, `ADMIN_PASSWORD_HASH`, `EDITOR_PASSWORD_HASH`)
+4. Click Apply — migrations and seeding run automatically on first deploy
+
+Alternatively, create each service manually:
+
+| Service | Runtime | Root Directory | Build Command | Start Command |
+|---|---|---|---|---|
+| Backend | Python 3.11 | `apps/api` | `pip install -r requirements.txt` | `alembic upgrade head && python seed.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+| Frontend | Node 20 | `apps/web` | `npm install && npm run build` | `npx next start -p $PORT` |
+
 ## Project Structure
 
 ```
@@ -110,11 +130,11 @@ innovateus-feedback/
         models.py         # SQLAlchemy models (Cohort, Submission, Answer, SurveyConfigVersion)
         schemas.py        # Pydantic schemas
       alembic/
-        versions/         # Database migrations (001–003)
+        versions/         # Database migrations (001–004)
   docs/
     prompts/              # AI prompt templates
     survey-config/        # Survey definition JSON with question groups
-  infra/                  # Docker configuration
+  render.yaml             # Render deployment blueprint
 ```
 
 ## Key Features
@@ -149,15 +169,25 @@ innovateus-feedback/
 - Admin dashboard supports filtering responses by survey version
 - Restoring an old version creates a new forward version (history is never rewritten)
 
+### Ballot-Box Stuffing Protection
+- IP-based duplicate submission detection with SHA-256 hashing (salted for privacy)
+- Configurable `max_submissions_per_ip` limit per program (default: 1, set to 0 for unlimited)
+- Only completed submissions count — starting and abandoning does not block future attempts
+- Incomplete submissions are automatically resumed instead of creating duplicates
+- Friendly "Thank You" page for blocked users
+
 ### Manager Dashboard
-- Overview metrics (submissions, completion rate, avg scores)
-- Response table with filters (cohort, date range, survey version)
-- Top themes, barriers, success stories
+- Overview metrics (submissions, completion rate, avg recommend score, confidence distribution, vagueness rate)
+- All metrics respect active filters (cohort, date range, survey version)
+- Response table with status badges, version stamps, and duplicate IP detection
+- Create new programs directly from the dashboard with auto-generated survey links
+- Delete all responses with confirmation dialog (scoped to selected program or all)
 - Export: Raw CSV, Structured CSV, Summary PDF, Summary PPTX
 
 ### Survey Editor
 - Visual question editor with drag-to-reorder, conditional logic, and group assignment
 - Question group management with randomization toggles
+- Configurable max submissions per IP setting
 - Active version label displayed next to save button
 - Save feedback: "Saved as v4" or "No changes detected"
 - Collapsible version history panel with view and restore
@@ -166,13 +196,14 @@ innovateus-feedback/
 - No participant login or identifiers
 - Audio exists only in browser memory and transient server memory
 - Server never writes audio to disk
+- IP addresses are hashed (never stored in plain text)
 - All responses anonymous by default
 
 ## API Endpoints
 
 ### Public (Participant)
 - `GET /v1/survey/{cohort_id}` — Survey config (randomized per request)
-- `POST /v1/submissions/start` — Start submission (stamps survey version)
+- `POST /v1/submissions/start` — Start or resume submission (stamps survey version)
 - `POST /v1/submissions/{id}/answer` — Save answer
 - `POST /v1/submissions/{id}/complete` — Complete + extract
 - `POST /v1/transcribe` — Audio to text (Whisper)
@@ -180,17 +211,20 @@ innovateus-feedback/
 - `POST /v1/ai/followups` — Generate follow-ups
 
 ### Admin (Manager)
-- `POST /v1/admin/login` — Password auth
-- `GET /v1/admin/metrics` — Dashboard metrics (filterable by survey version)
-- `GET /v1/admin/responses` — Paginated responses (filterable by survey version)
-- `GET /v1/admin/cohorts` — List all cohorts
+- `POST /v1/admin/login` — Password auth (JWT)
+- `GET /v1/admin/metrics` — Dashboard metrics (filterable by cohort, date range, survey version)
+- `GET /v1/admin/responses` — Paginated responses (filterable by cohort, date range, survey version)
+- `DELETE /v1/admin/responses` — Delete all responses (optional cohort filter)
+- `GET /v1/admin/cohorts` — List all cohorts/programs
+- `POST /v1/admin/cohorts` — Create new program with default survey config
+- `POST /v1/admin/cohorts/{id}/settings` — Update program settings (max submissions per IP)
 - `GET /v1/admin/export/raw.csv` — Raw data export
 - `GET /v1/admin/export/structured.csv` — Structured export
 - `GET /v1/admin/export/summary.pdf` — PDF report
 - `GET /v1/admin/export/summary.pptx` — PPTX report
 
 ### Editor
-- `POST /v1/admin/editor/login` — Editor password auth
+- `POST /v1/admin/editor/login` — Editor password auth (JWT)
 - `GET /v1/admin/editor/survey/{cohort_id}` — Get survey config (canonical order, includes active version)
 - `PUT /v1/admin/editor/survey/{cohort_id}` — Save survey config (auto-versions on change)
 - `GET /v1/admin/editor/survey/{cohort_id}/versions` — List version history
@@ -206,6 +240,7 @@ The project uses Alembic for schema migrations:
 | `001` | Initial schema (cohorts, submissions, answers, extractions) |
 | `002` | Add extractions table |
 | `003` | Survey version control (survey_config_versions table, survey_version on submissions, active_version on cohorts, v1 backfill) |
+| `004` | Ballot-box stuffing protection (ip_hash on submissions, max_submissions_per_ip on cohorts, composite index) |
 
 Run all pending migrations:
 
@@ -218,12 +253,11 @@ alembic upgrade head
 
 | Variable | Description |
 |---|---|
-| `DATABASE_URL` | Async PostgreSQL connection string |
-| `DATABASE_URL_SYNC` | Sync PostgreSQL connection string (Alembic) |
+| `DATABASE_URL` | PostgreSQL connection string |
 | `OPENAI_API_KEY` | OpenAI API key |
 | `ADMIN_PASSWORD_HASH` | Bcrypt hash of admin password |
 | `EDITOR_PASSWORD_HASH` | Bcrypt hash of editor password |
 | `JWT_SECRET` | JWT signing secret |
-| `CORS_ORIGINS` | Allowed CORS origins |
+| `CORS_ORIGINS` | Allowed CORS origins (comma-separated) |
 | `NEXT_PUBLIC_API_URL` | Backend URL for frontend |
 | `ENVIRONMENT` | `development` or `production` |
