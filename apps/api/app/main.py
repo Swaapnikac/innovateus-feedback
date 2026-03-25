@@ -5,11 +5,14 @@ from app.routers import survey, submissions, transcribe, ai, admin, editor
 
 settings = get_settings()
 
+# Strip whitespace — "https://a.com, https://b.com" must not leave leading spaces on origins
+_cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+
 app = FastAPI(title="InnovateUS Feedback API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins.split(","),
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
