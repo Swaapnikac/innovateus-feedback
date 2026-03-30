@@ -332,6 +332,31 @@ async def delete_all_responses(
     return {"status": "ok", "deleted": len(sub_ids)}
 
 
+@router.get("/qualtrics/status", dependencies=[Depends(require_admin)])
+async def qualtrics_status():
+    from app.services.qualtrics_service import _is_configured
+    settings = get_settings()
+    return {
+        "configured": _is_configured(),
+        "data_center": settings.qualtrics_data_center or None,
+        "survey_id": settings.qualtrics_survey_id or None,
+    }
+
+
+@router.post("/qualtrics/sync/{submission_id}", dependencies=[Depends(require_admin)])
+async def qualtrics_manual_sync(
+    submission_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.qualtrics_service import sync_submission, _is_configured
+    if not _is_configured():
+        raise HTTPException(status_code=400, detail="Qualtrics integration is not configured")
+    result = await sync_submission(submission_id, db)
+    if not result["success"]:
+        raise HTTPException(status_code=502, detail=result.get("error", "Sync failed"))
+    return {"status": "synced", "submission_id": str(submission_id)}
+
+
 @router.post("/cohorts/{cohort_id}/settings", dependencies=[Depends(require_admin)])
 async def update_cohort_settings(
     cohort_id: uuid.UUID,

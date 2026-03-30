@@ -2,10 +2,10 @@ import uuid
 import hashlib
 import logging
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from app.db import get_db
+from app.db import get_db, async_session
 from app.models import Submission, Answer, Extraction, Cohort
 from app.schemas import (
     StartSubmissionRequest,
@@ -119,10 +119,23 @@ async def save_answer(
     return AnswerResponse(id=answer.id, question_id=answer.question_id)
 
 
+async def _qualtrics_sync_background(submission_id: uuid.UUID):
+    """Background task: push completed submission to Qualtrics."""
+    from app.services.qualtrics_service import sync_submission, _is_configured
+    if not _is_configured():
+        return
+    try:
+        async with async_session() as session:
+            await sync_submission(submission_id, session)
+    except Exception as e:
+        logger.warning(f"Qualtrics background sync failed for {submission_id}: {e}")
+
+
 @router.post("/submissions/{submission_id}/complete", response_model=CompleteSubmissionResponse)
 async def complete_submission(
     submission_id: uuid.UUID,
     response: Response,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     submission = await db.get(Submission, submission_id)
@@ -194,5 +207,7 @@ async def complete_submission(
             samesite="lax",
             max_age=30 * 24 * 3600,
         )
+
+    background_tasks.add_task(_qualtrics_sync_background, submission_id)
 
     return CompleteSubmissionResponse(status="completed", extraction=extraction_data)
