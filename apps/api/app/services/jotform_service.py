@@ -75,8 +75,16 @@ def _build_submission_data(
         answer = answers.get(q_id)
         if answer:
             value = _format_answer_value(answer.answer_raw, answer.question_type)
-            if value:
-                data[f"submission[{jf_qid}]"] = value
+
+            parts = [value] if value else []
+            if answer.followup_1_answer:
+                parts.append(answer.followup_1_answer)
+            if answer.followup_2_answer:
+                parts.append(answer.followup_2_answer)
+
+            combined = "\n".join(parts) if parts else ""
+            if combined:
+                data[f"submission[{jf_qid}]"] = combined
 
             if answer.followup_1 or answer.followup_1_answer:
                 followups[q_id] = followups.get(q_id, {})
