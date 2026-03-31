@@ -1,6 +1,6 @@
 """JotForm integration — push completed submissions via JotForm API.
 
-Follows the same graceful-degradation pattern as qualtrics_service.py:
+Follows a graceful-degradation pattern:
 skip silently when not configured, log errors but never break the main flow.
 
 JotForm API: PUT /form/{formId}/submissions
