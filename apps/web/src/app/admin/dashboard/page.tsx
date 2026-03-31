@@ -49,6 +49,7 @@ import {
   Copy,
   Link2,
   Trash2,
+  GitBranch,
 } from "lucide-react";
 import { api, type ExtractionResult } from "@/lib/api";
 import { InnovateLogo } from "@/components/InnovateLogo";
@@ -245,6 +246,10 @@ export default function DashboardPage() {
           <Button size="sm" onClick={() => setShowNewProgram(true)} className="rounded-full bg-brand-blue hover:bg-brand-blue/90 gap-2">
             <Plus className="h-4 w-4" />
             New Program
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => router.push("/admin/pipelines")} className="rounded-full border-brand-teal/20 text-brand-teal hover:bg-brand-teal/5 gap-2">
+            <GitBranch className="h-4 w-4" />
+            Pipelines
           </Button>
           <Button variant="outline" size="sm" onClick={() => router.push("/admin/editor/login")} className="rounded-full border-brand-dark-yellow/20 text-brand-dark-yellow hover:bg-brand-yellow/10 gap-2">
             <Settings className="h-4 w-4" />
