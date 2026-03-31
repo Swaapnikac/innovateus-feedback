@@ -32,12 +32,6 @@ services:
         value: production
       - key: PYTHON_VERSION
         value: "3.11.6"
-      - key: QUALTRICS_API_TOKEN
-        sync: false
-      - key: QUALTRICS_DATA_CENTER
-        sync: false
-      - key: QUALTRICS_SURVEY_ID
-        sync: false
 
   - type: web
     name: innovateus-web

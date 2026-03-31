@@ -11,11 +11,6 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     environment: str = "development"
 
-    # Qualtrics integration (optional — leave empty to disable)
-    qualtrics_api_token: str = ""
-    qualtrics_data_center: str = ""    # e.g. "ca1", "az1", "sjc1"
-    qualtrics_survey_id: str = ""      # e.g. "SV_xxxxxxxxxx"
-
     model_config = {"env_file": "../../.env", "env_file_encoding": "utf-8", "extra": "ignore", "env_ignore_empty": True}
 
     @property
