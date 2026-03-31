@@ -280,4 +280,26 @@ export const api = {
     if (params?.end) query.set("end", params.end);
     return `${API_URL}/v1/admin/export/${type}?${query}`;
   },
+
+  getQualtricsStatus: () =>
+    request<{ configured: boolean; data_center: string | null; survey_id: string | null }>(
+      "/v1/admin/qualtrics/status"
+    ),
+
+  syncQualtrics: (submissionId: string) =>
+    request<{ status: string; submission_id: string }>(
+      `/v1/admin/qualtrics/sync/${submissionId}`,
+      { method: "POST" }
+    ),
+
+  getJotformStatus: () =>
+    request<{ configured: boolean; form_id: string | null; api_url: string | null }>(
+      "/v1/admin/jotform/status"
+    ),
+
+  syncJotform: (submissionId: string) =>
+    request<{ status: string; submission_id: string }>(
+      `/v1/admin/jotform/sync/${submissionId}`,
+      { method: "POST" }
+    ),
 };

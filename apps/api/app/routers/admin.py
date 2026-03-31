@@ -357,6 +357,31 @@ async def qualtrics_manual_sync(
     return {"status": "synced", "submission_id": str(submission_id)}
 
 
+@router.get("/jotform/status", dependencies=[Depends(require_admin)])
+async def jotform_status():
+    from app.services.jotform_service import _is_configured
+    settings = get_settings()
+    return {
+        "configured": _is_configured(),
+        "form_id": settings.jotform_form_id or None,
+        "api_url": settings.jotform_api_url or None,
+    }
+
+
+@router.post("/jotform/sync/{submission_id}", dependencies=[Depends(require_admin)])
+async def jotform_manual_sync(
+    submission_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.jotform_service import sync_submission, _is_configured
+    if not _is_configured():
+        raise HTTPException(status_code=400, detail="JotForm integration is not configured")
+    result = await sync_submission(submission_id, db)
+    if not result["success"]:
+        raise HTTPException(status_code=502, detail=result.get("error", "Sync failed"))
+    return {"status": "synced", "submission_id": str(submission_id)}
+
+
 @router.post("/cohorts/{cohort_id}/settings", dependencies=[Depends(require_admin)])
 async def update_cohort_settings(
     cohort_id: uuid.UUID,

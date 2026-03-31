@@ -131,6 +131,18 @@ async def _qualtrics_sync_background(submission_id: uuid.UUID):
         logger.warning(f"Qualtrics background sync failed for {submission_id}: {e}")
 
 
+async def _jotform_sync_background(submission_id: uuid.UUID):
+    """Background task: push completed submission to JotForm."""
+    from app.services.jotform_service import sync_submission, _is_configured
+    if not _is_configured():
+        return
+    try:
+        async with async_session() as session:
+            await sync_submission(submission_id, session)
+    except Exception as e:
+        logger.warning(f"JotForm background sync failed for {submission_id}: {e}")
+
+
 @router.post("/submissions/{submission_id}/complete", response_model=CompleteSubmissionResponse)
 async def complete_submission(
     submission_id: uuid.UUID,
@@ -209,5 +221,6 @@ async def complete_submission(
         )
 
     background_tasks.add_task(_qualtrics_sync_background, submission_id)
+    background_tasks.add_task(_jotform_sync_background, submission_id)
 
     return CompleteSubmissionResponse(status="completed", extraction=extraction_data)

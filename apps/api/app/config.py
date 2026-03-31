@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     qualtrics_data_center: str = ""    # e.g. "ca1", "az1", "sjc1"
     qualtrics_survey_id: str = ""      # e.g. "SV_xxxxxxxxxx"
 
+    # JotForm integration (optional — leave empty to disable)
+    jotform_api_key: str = ""
+    jotform_form_id: str = ""
+    jotform_api_url: str = "https://api.jotform.com"  # or https://eu-api.jotform.com
+
     model_config = {"env_file": "../../.env", "env_file_encoding": "utf-8", "extra": "ignore", "env_ignore_empty": True}
 
     @property

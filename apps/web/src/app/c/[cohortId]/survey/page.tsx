@@ -77,9 +77,9 @@ export default function SurveyPage() {
     }));
   };
 
-  const saveCurrentAnswer = useCallback(async () => {
+  const saveCurrentAnswer = useCallback(async (overrides?: Partial<AnswerState>) => {
     if (!currentQuestion || !submissionId) return;
-    const ans = getAnswer(currentQuestion.id);
+    const ans = { ...getAnswer(currentQuestion.id), ...overrides };
     const rawValue = currentQuestion.type === "multi"
       ? JSON.stringify(ans.multiValues)
       : ans.value;
@@ -108,8 +108,8 @@ export default function SurveyPage() {
     }
   }, [currentQuestion, submissionId, answers]);
 
-  const advanceToNext = useCallback(async () => {
-    await saveCurrentAnswer();
+  const advanceToNext = useCallback(async (overrides?: Partial<AnswerState>) => {
+    await saveCurrentAnswer(overrides);
 
     if (currentStep < visibleQuestions.length - 1) {
       setCurrentStep(currentStep + 1);
@@ -184,7 +184,7 @@ export default function SurveyPage() {
       updateAnswer(currentQuestion.id, { followupAnswers });
     }
     setShowFollowups(false);
-    await advanceToNext();
+    await advanceToNext({ followupAnswers });
   };
 
   const handlePrev = () => {
