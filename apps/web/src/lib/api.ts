@@ -303,10 +303,12 @@ export const api = {
       { method: "POST" }
     ),
 
-  syncAllQualtrics: (cohortId?: string) => {
-    const query = cohortId ? `?cohort_id=${cohortId}` : "";
+  syncAllQualtrics: (params?: { cohortId?: string; force?: boolean }) => {
+    const query = new URLSearchParams();
+    if (params?.cohortId) query.set("cohort_id", params.cohortId);
+    if (params?.force) query.set("force", "true");
     return request<{ total: number; synced: number; failed: number; errors: Array<{ submission_id: string; error: string }> }>(
-      `/v1/admin/qualtrics/sync-all${query}`,
+      `/v1/admin/qualtrics/sync-all?${query}`,
       { method: "POST" }
     );
   },

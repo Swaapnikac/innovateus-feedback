@@ -70,11 +70,11 @@ export default function PipelinesPage() {
   const [syncing, setSyncing] = useState<Record<string, boolean>>({});
   const [syncResult, setSyncResult] = useState<{ total: number; synced: number; failed: number } | null>(null);
 
-  const handleSyncAll = async () => {
+  const handleSyncAll = async (force: boolean) => {
     setSyncing((prev) => ({ ...prev, qualtrics: true }));
     setSyncResult(null);
     try {
-      const result = await api.syncAllQualtrics();
+      const result = await api.syncAllQualtrics({ force });
       setSyncResult(result);
     } catch {
       setSyncResult({ total: 0, synced: 0, failed: -1 });
@@ -372,7 +372,7 @@ export default function PipelinesPage() {
                       size="sm"
                       variant="outline"
                       className="rounded-full gap-2 border-brand-blue/20 text-brand-blue hover:bg-brand-blue/5"
-                      onClick={handleSyncAll}
+                      onClick={() => handleSyncAll(false)}
                       disabled={syncing.qualtrics}
                     >
                       {syncing.qualtrics ? (
@@ -380,7 +380,17 @@ export default function PipelinesPage() {
                       ) : (
                         <RefreshCw className="h-3.5 w-3.5" />
                       )}
-                      {syncing.qualtrics ? "Syncing..." : "Sync All Responses"}
+                      {syncing.qualtrics ? "Syncing..." : "Sync New"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="rounded-full gap-2 border-brand-dark-yellow/30 text-brand-dark-yellow hover:bg-brand-yellow/10"
+                      onClick={() => handleSyncAll(true)}
+                      disabled={syncing.qualtrics}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Re-sync All
                     </Button>
                     {syncResult && (
                       <span className={`text-xs ${syncResult.failed === -1 ? "text-red-500" : syncResult.failed > 0 ? "text-brand-dark-yellow" : "text-brand-teal"}`}>

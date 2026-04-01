@@ -372,14 +372,14 @@ async def qualtrics_sync_one(
 @router.post("/qualtrics/sync-all", dependencies=[Depends(require_admin)])
 async def qualtrics_sync_all(
     cohort_id: Optional[uuid.UUID] = None,
+    force: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
     from app.services.qualtrics_service import sync_submission
 
-    query = select(Submission).where(
-        Submission.status == "completed",
-        Submission.qualtrics_synced_at.is_(None),
-    )
+    query = select(Submission).where(Submission.status == "completed")
+    if not force:
+        query = query.where(Submission.qualtrics_synced_at.is_(None))
     if cohort_id:
         query = query.where(Submission.cohort_id == cohort_id)
 
@@ -392,7 +392,7 @@ async def qualtrics_sync_all(
     errors: list[dict] = []
 
     for sub in submissions:
-        sync_result = await sync_submission(sub.id, db, force=False)
+        sync_result = await sync_submission(sub.id, db, force=True)
         if sync_result["success"]:
             synced += 1
         else:
