@@ -291,4 +291,23 @@ export const api = {
       `/v1/admin/jotform/sync/${submissionId}`,
       { method: "POST" }
     ),
+
+  getQualtricsStatus: () =>
+    request<{ configured: boolean; survey_id: string | null; datacenter_id: string | null }>(
+      "/v1/admin/qualtrics/status"
+    ),
+
+  syncQualtrics: (submissionId: string) =>
+    request<{ status: string; submission_id: string; error: string | null }>(
+      `/v1/admin/qualtrics/sync/${submissionId}`,
+      { method: "POST" }
+    ),
+
+  syncAllQualtrics: (cohortId?: string) => {
+    const query = cohortId ? `?cohort_id=${cohortId}` : "";
+    return request<{ total: number; synced: number; failed: number; errors: Array<{ submission_id: string; error: string }> }>(
+      `/v1/admin/qualtrics/sync-all${query}`,
+      { method: "POST" }
+    );
+  },
 };

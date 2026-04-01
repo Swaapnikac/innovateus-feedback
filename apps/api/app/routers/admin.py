@@ -345,3 +345,58 @@ async def update_cohort_settings(
     cohort.max_submissions_per_ip = req.max_submissions_per_ip
     await db.flush()
     return {"status": "updated", "max_submissions_per_ip": cohort.max_submissions_per_ip}
+
+
+@router.get("/qualtrics/status", dependencies=[Depends(require_admin)])
+async def qualtrics_status():
+    s = get_settings()
+    configured = bool(s.qualtrics_api_token and s.qualtrics_survey_id and s.qualtrics_datacenter_id)
+    return {
+        "configured": configured,
+        "survey_id": s.qualtrics_survey_id or None,
+        "datacenter_id": s.qualtrics_datacenter_id or None,
+    }
+
+
+@router.post("/qualtrics/sync/{submission_id}", dependencies=[Depends(require_admin)])
+async def qualtrics_sync_one(
+    submission_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.qualtrics_service import sync_submission
+    result = await sync_submission(submission_id, db, force=True)
+    status_code = "ok" if result["success"] else "error"
+    return {"status": status_code, "submission_id": str(submission_id), "error": result.get("error")}
+
+
+@router.post("/qualtrics/sync-all", dependencies=[Depends(require_admin)])
+async def qualtrics_sync_all(
+    cohort_id: Optional[uuid.UUID] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.qualtrics_service import sync_submission
+
+    query = select(Submission).where(
+        Submission.status == "completed",
+        Submission.qualtrics_synced_at.is_(None),
+    )
+    if cohort_id:
+        query = query.where(Submission.cohort_id == cohort_id)
+
+    result = await db.execute(query)
+    submissions = result.scalars().all()
+
+    total = len(submissions)
+    synced = 0
+    failed = 0
+    errors: list[dict] = []
+
+    for sub in submissions:
+        sync_result = await sync_submission(sub.id, db, force=False)
+        if sync_result["success"]:
+            synced += 1
+        else:
+            failed += 1
+            errors.append({"submission_id": str(sub.id), "error": sync_result.get("error")})
+
+    return {"total": total, "synced": synced, "failed": failed, "errors": errors}

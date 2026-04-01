@@ -54,6 +54,17 @@ export default function PipelinesPage() {
       color: "brand-dark-yellow",
       icon: "jotform",
     },
+    {
+      id: "qualtrics",
+      name: "Qualtrics",
+      description:
+        "Automatically push completed responses to a Qualtrics survey via the Response Import API. Syncs on every submission completion.",
+      configured: false,
+      details: {},
+      loading: true,
+      color: "brand-blue",
+      icon: "qualtrics",
+    },
   ]);
 
   const [syncing, setSyncing] = useState<Record<string, boolean>>({});
@@ -82,6 +93,35 @@ export default function PipelinesPage() {
         setPipelines((prev) =>
           prev.map((p) =>
             p.id === "jotform"
+              ? { ...p, loading: false, details: { error: "Failed to check" } }
+              : p
+          )
+        );
+      });
+
+    api
+      .getQualtricsStatus()
+      .then((data) => {
+        setPipelines((prev) =>
+          prev.map((p) =>
+            p.id === "qualtrics"
+              ? {
+                  ...p,
+                  configured: data.configured,
+                  details: {
+                    survey_id: data.survey_id,
+                    datacenter_id: data.datacenter_id,
+                  },
+                  loading: false,
+                }
+              : p
+          )
+        );
+      })
+      .catch(() => {
+        setPipelines((prev) =>
+          prev.map((p) =>
+            p.id === "qualtrics"
               ? { ...p, loading: false, details: { error: "Failed to check" } }
               : p
           )
@@ -171,13 +211,19 @@ export default function PipelinesPage() {
                       className={`w-10 h-10 rounded-xl flex items-center justify-center ${
                         pipeline.id === "backend"
                           ? "bg-brand-teal/10"
-                          : "bg-brand-yellow/15"
+                          : pipeline.id === "qualtrics"
+                            ? "bg-brand-blue/10"
+                            : "bg-brand-yellow/15"
                       }`}
                     >
                       {pipeline.id === "backend" ? (
                         <Database
                           className="h-5 w-5 text-brand-teal"
                         />
+                      ) : pipeline.id === "qualtrics" ? (
+                        <span className="text-base font-bold text-brand-blue">
+                          Q
+                        </span>
                       ) : (
                         <span className="text-base font-bold text-brand-dark-yellow">
                           JF
@@ -242,35 +288,65 @@ export default function PipelinesPage() {
                         <p className="text-xs font-semibold text-brand-blue/40 uppercase tracking-wider">
                           How to Enable
                         </p>
-                        <ol className="text-sm text-brand-blue/60 space-y-1 list-decimal list-inside">
-                          <li>
-                            Get your API key from{" "}
-                            <a
-                              href="https://www.jotform.com/myaccount/api"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-brand-blue underline inline-flex items-center gap-1"
-                            >
-                              jotform.com/myaccount/api
-                              <ExternalLink className="h-3 w-3" />
-                            </a>
-                          </li>
-                          <li>
-                            Add{" "}
-                            <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
-                              JOTFORM_API_KEY
-                            </code>{" "}
-                            and{" "}
-                            <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
-                              JOTFORM_FORM_ID
-                            </code>{" "}
-                            to your{" "}
-                            <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
-                              .env
-                            </code>
-                          </li>
-                          <li>Restart the API server</li>
-                        </ol>
+                        {pipeline.id === "qualtrics" ? (
+                          <ol className="text-sm text-brand-blue/60 space-y-1 list-decimal list-inside">
+                            <li>
+                              Get your API token from Qualtrics Account Settings
+                            </li>
+                            <li>
+                              Create a matching survey in Qualtrics with Embedded Data fields
+                            </li>
+                            <li>
+                              Add{" "}
+                              <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
+                                QUALTRICS_API_TOKEN
+                              </code>
+                              ,{" "}
+                              <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
+                                QUALTRICS_SURVEY_ID
+                              </code>
+                              , and{" "}
+                              <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
+                                QUALTRICS_DATACENTER_ID
+                              </code>{" "}
+                              to your{" "}
+                              <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
+                                .env
+                              </code>
+                            </li>
+                            <li>Run migration and restart the API server</li>
+                          </ol>
+                        ) : (
+                          <ol className="text-sm text-brand-blue/60 space-y-1 list-decimal list-inside">
+                            <li>
+                              Get your API key from{" "}
+                              <a
+                                href="https://www.jotform.com/myaccount/api"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-brand-blue underline inline-flex items-center gap-1"
+                              >
+                                jotform.com/myaccount/api
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            </li>
+                            <li>
+                              Add{" "}
+                              <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
+                                JOTFORM_API_KEY
+                              </code>{" "}
+                              and{" "}
+                              <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
+                                JOTFORM_FORM_ID
+                              </code>{" "}
+                              to your{" "}
+                              <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
+                                .env
+                              </code>
+                            </li>
+                            <li>Restart the API server</li>
+                          </ol>
+                        )}
                       </div>
                     )}
                   </div>

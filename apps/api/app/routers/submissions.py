@@ -183,6 +183,14 @@ async def complete_submission(
 
     await db.flush()
 
+    try:
+        from app.services.qualtrics_service import sync_submission as qualtrics_sync
+        qualtrics_result = await qualtrics_sync(submission_id, db)
+        if not qualtrics_result.get("success") and qualtrics_result.get("error") != "Qualtrics not configured":
+            logger.warning("Qualtrics sync failed for %s: %s", submission_id, qualtrics_result.get("error"))
+    except Exception as e:
+        logger.warning("Qualtrics sync error for %s: %s", submission_id, e)
+
     cohort = await db.get(Cohort, submission.cohort_id)
     if cohort and cohort.max_submissions_per_ip > 0:
         cookie_name = f"submitted_{submission.cohort_id}"

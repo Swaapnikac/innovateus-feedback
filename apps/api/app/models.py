@@ -55,6 +55,8 @@ class Submission(Base):
     survey_version: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     ip_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     client_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    jotform_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    qualtrics_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     cohort: Mapped["Cohort"] = relationship(back_populates="submissions")
     answers: Mapped[list["Answer"]] = relationship(back_populates="submission", cascade="all, delete-orphan")

@@ -8,6 +8,14 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me-in-production"
     admin_password_hash: str = ""
     editor_password_hash: str = ""
+    # Qualtrics
+    qualtrics_api_token: str = ""
+    qualtrics_survey_id: str = ""
+    qualtrics_datacenter_id: str = ""
+    # JotForm
+    jotform_api_key: str = ""
+    jotform_form_id: str = ""
+    jotform_api_url: str = "https://api.jotform.com"
     cors_origins: str = "http://localhost:3000"
     environment: str = "development"
 
