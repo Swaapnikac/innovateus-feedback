@@ -106,16 +106,16 @@ def _build_answer_value(question_id: str, answer_raw: str | None, question_type:
     if question_id in TEXT_ENTRY_QUESTIONS:
         return {f"{qid}_TEXT": answer_raw}
 
-    # Multi-select: send as pipe-separated text in embedded data instead
-    # (Qualtrics Response Import doesn't handle multi-select QIDs cleanly)
+    # Multi-select: Qualtrics checkbox QIDs don't accept _TEXT.
+    # Store as a pipe-separated embedded data field using the question_id as key.
     if question_type == "multi":
         try:
             items = json.loads(answer_raw)
             if isinstance(items, list):
-                return {f"{qid}_TEXT": " | ".join(str(i) for i in items)}
+                return {f"{question_id}_answer": " | ".join(str(i) for i in items)}
         except (json.JSONDecodeError, TypeError):
             pass
-        return {f"{qid}_TEXT": answer_raw}
+        return {f"{question_id}_answer": answer_raw}
 
     # MCQ: map text to recode value
     if question_id in RECODE_MAPS:
