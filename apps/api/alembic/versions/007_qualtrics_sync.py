@@ -15,7 +15,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("submissions", sa.Column("qualtrics_synced_at", sa.DateTime, nullable=True))
+    conn = op.get_bind()
+    result = conn.execute(sa.text(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name = 'submissions' AND column_name = 'qualtrics_synced_at'"
+    ))
+    if result.fetchone() is None:
+        op.add_column("submissions", sa.Column("qualtrics_synced_at", sa.DateTime, nullable=True))
 
 
 def downgrade() -> None:
