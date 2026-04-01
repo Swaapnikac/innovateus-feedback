@@ -146,52 +146,43 @@ def _build_payload(
             if result:
                 values.update(result)
 
-    # Per-question embedded data (input_mode, vagueness, followups)
+    # Per-question metadata (input_mode, vagueness, followups) — sent in values
     for q_id in ALL_QUESTION_IDS:
         answer = answers.get(q_id)
         if answer:
-            embedded[f"{q_id}_input_mode"] = answer.input_mode or "none"
-            embedded[f"{q_id}_is_vague"] = str(answer.is_vague).lower() if answer.is_vague is not None else ""
-            embedded[f"{q_id}_followup_1_q"] = answer.followup_1 or ""
-            embedded[f"{q_id}_followup_1_a"] = answer.followup_1_answer or ""
-            embedded[f"{q_id}_followup_2_q"] = answer.followup_2 or ""
-            embedded[f"{q_id}_followup_2_a"] = answer.followup_2_answer or ""
-        else:
-            embedded[f"{q_id}_input_mode"] = ""
-            embedded[f"{q_id}_is_vague"] = ""
-            embedded[f"{q_id}_followup_1_q"] = ""
-            embedded[f"{q_id}_followup_1_a"] = ""
-            embedded[f"{q_id}_followup_2_q"] = ""
-            embedded[f"{q_id}_followup_2_a"] = ""
+            values[f"{q_id}_input_mode"] = answer.input_mode or "none"
+            if answer.is_vague is not None:
+                values[f"{q_id}_is_vague"] = str(answer.is_vague).lower()
+            if answer.followup_1:
+                values[f"{q_id}_followup_1_q"] = answer.followup_1
+            if answer.followup_1_answer:
+                values[f"{q_id}_followup_1_a"] = answer.followup_1_answer
+            if answer.followup_2:
+                values[f"{q_id}_followup_2_q"] = answer.followup_2
+            if answer.followup_2_answer:
+                values[f"{q_id}_followup_2_a"] = answer.followup_2_answer
 
     # Submission metadata
-    embedded["submission_id"] = str(submission.id)
-    embedded["cohort_name"] = cohort.name if cohort else ""
-    embedded["course_name"] = cohort.course_name if cohort else ""
-    embedded["survey_version"] = submission.survey_version or ""
-    embedded["completed_at"] = submission.completed_at.isoformat() if submission.completed_at else ""
-    embedded["time_to_complete_sec"] = str(submission.time_to_complete_sec or "")
-    embedded["consent_version"] = submission.consent_version or ""
+    values["submission_id"] = str(submission.id)
+    values["cohort_name"] = cohort.name if cohort else ""
+    values["course_name"] = cohort.course_name if cohort else ""
+    values["survey_version"] = submission.survey_version or ""
+    values["completed_at"] = submission.completed_at.isoformat() if submission.completed_at else ""
+    values["time_to_complete_sec"] = str(submission.time_to_complete_sec or "")
+    values["consent_version"] = submission.consent_version or ""
 
     # AI extraction
     if extraction:
-        embedded["ext_what_was_tried"] = extraction.what_was_tried or ""
-        embedded["ext_planned_task_or_workflow"] = extraction.planned_task_or_workflow or ""
-        embedded["ext_outcome_or_expected_outcome"] = extraction.outcome_or_expected_outcome or ""
-        embedded["ext_barriers"] = " | ".join(extraction.barriers) if extraction.barriers else ""
-        embedded["ext_enablers"] = " | ".join(extraction.enablers) if extraction.enablers else ""
-        embedded["ext_public_benefit"] = extraction.public_benefit or ""
-        embedded["ext_top_themes"] = " | ".join(extraction.top_themes) if extraction.top_themes else ""
-        embedded["ext_success_story_candidate"] = extraction.success_story_candidate or ""
-    else:
-        for key in [
-            "ext_what_was_tried", "ext_planned_task_or_workflow",
-            "ext_outcome_or_expected_outcome", "ext_barriers", "ext_enablers",
-            "ext_public_benefit", "ext_top_themes", "ext_success_story_candidate",
-        ]:
-            embedded[key] = ""
+        values["ext_what_was_tried"] = extraction.what_was_tried or ""
+        values["ext_planned_task_or_workflow"] = extraction.planned_task_or_workflow or ""
+        values["ext_outcome_or_expected_outcome"] = extraction.outcome_or_expected_outcome or ""
+        values["ext_barriers"] = " | ".join(extraction.barriers) if extraction.barriers else ""
+        values["ext_enablers"] = " | ".join(extraction.enablers) if extraction.enablers else ""
+        values["ext_public_benefit"] = extraction.public_benefit or ""
+        values["ext_top_themes"] = " | ".join(extraction.top_themes) if extraction.top_themes else ""
+        values["ext_success_story_candidate"] = extraction.success_story_candidate or ""
 
-    return {"values": values, "embeddedData": embedded}
+    return {"values": values}
 
 
 async def push_to_qualtrics(payload: dict, submission_id: uuid.UUID) -> dict:
