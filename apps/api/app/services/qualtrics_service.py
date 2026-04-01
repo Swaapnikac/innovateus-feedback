@@ -162,6 +162,9 @@ def _build_payload(
             if answer.followup_2_answer:
                 values[f"{q_id}_followup_2_a"] = answer.followup_2_answer
 
+    # Response source identifier
+    values["response_source"] = "Voice Feedback Tool"
+
     # Submission metadata
     values["submission_id"] = str(submission.id)
     values["cohort_name"] = cohort.name if cohort else ""
