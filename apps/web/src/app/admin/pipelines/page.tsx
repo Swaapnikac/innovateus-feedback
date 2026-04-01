@@ -68,6 +68,20 @@ export default function PipelinesPage() {
   ]);
 
   const [syncing, setSyncing] = useState<Record<string, boolean>>({});
+  const [syncResult, setSyncResult] = useState<{ total: number; synced: number; failed: number } | null>(null);
+
+  const handleSyncAll = async () => {
+    setSyncing((prev) => ({ ...prev, qualtrics: true }));
+    setSyncResult(null);
+    try {
+      const result = await api.syncAllQualtrics();
+      setSyncResult(result);
+    } catch {
+      setSyncResult({ total: 0, synced: 0, failed: -1 });
+    } finally {
+      setSyncing((prev) => ({ ...prev, qualtrics: false }));
+    }
+  };
 
   useEffect(() => {
     api
@@ -348,6 +362,34 @@ export default function PipelinesPage() {
                           </ol>
                         )}
                       </div>
+                    )}
+                  </div>
+                )}
+
+                {pipeline.id === "qualtrics" && pipeline.configured && (
+                  <div className="flex items-center gap-3 pt-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="rounded-full gap-2 border-brand-blue/20 text-brand-blue hover:bg-brand-blue/5"
+                      onClick={handleSyncAll}
+                      disabled={syncing.qualtrics}
+                    >
+                      {syncing.qualtrics ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )}
+                      {syncing.qualtrics ? "Syncing..." : "Sync All Responses"}
+                    </Button>
+                    {syncResult && (
+                      <span className={`text-xs ${syncResult.failed === -1 ? "text-red-500" : syncResult.failed > 0 ? "text-brand-dark-yellow" : "text-brand-teal"}`}>
+                        {syncResult.failed === -1
+                          ? "Sync failed — check connection"
+                          : syncResult.total === 0
+                            ? "All responses already synced"
+                            : `${syncResult.synced} synced${syncResult.failed > 0 ? `, ${syncResult.failed} failed` : ""}`}
+                      </span>
                     )}
                   </div>
                 )}
