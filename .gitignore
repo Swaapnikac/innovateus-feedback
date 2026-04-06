@@ -33,3 +33,6 @@ npm-debug.log*
 # Database
 *.db
 *.sqlite3
+
+# Office temp lock files
+~$*
