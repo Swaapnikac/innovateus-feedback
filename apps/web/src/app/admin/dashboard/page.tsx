@@ -133,14 +133,33 @@ export default function DashboardPage() {
     loadData();
   }, [loadData]);
 
-  const handleExport = (type: "raw.csv" | "structured.csv" | "summary.pdf" | "summary.pptx") => {
+  const handleExport = async (type: "raw.csv" | "structured.csv" | "summary.pdf" | "summary.pptx") => {
     const exportCohortId = selectedCohort && selectedCohort !== "all" ? selectedCohort : undefined;
     const url = api.exportUrl(type, {
       cohort_id: exportCohortId,
       start: startDate || undefined,
       end: endDate || undefined,
     });
-    window.open(url, "_blank");
+    try {
+      const token = localStorage.getItem("admin_token");
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      const ext = type.split(".").pop();
+      a.download = type.includes("summary") ? `summary_report.${ext}` : `${type.replace(".", "_")}_export.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error("Export failed:", err);
+    }
   };
 
   const handleLogout = () => {

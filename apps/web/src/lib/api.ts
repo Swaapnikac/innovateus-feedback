@@ -248,6 +248,11 @@ export const api = {
       body: JSON.stringify({ password }),
     }),
 
+  getEditorCohorts: () =>
+    request<Array<{ id: string; name: string; course_name: string; max_submissions_per_ip: number; created_at: string }>>(
+      "/v1/admin/editor/cohorts"
+    ),
+
   getEditorSurvey: (cohortId: string) =>
     request<SurveyConfig>(`/v1/admin/editor/survey/${cohortId}`),
 

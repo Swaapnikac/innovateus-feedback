@@ -434,7 +434,7 @@ export default function EditorPage() {
 
   useEffect(() => {
     api
-      .getCohorts()
+      .getEditorCohorts()
       .then((data) => {
         setCohorts(data);
         if (data.length > 0) {
