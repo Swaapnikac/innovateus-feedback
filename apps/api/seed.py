@@ -1,14 +1,13 @@
-"""Seed script to create a default cohort for development."""
+"""Seed script to create a default cohort in DynamoDB for development."""
 import json
+import sys
 import uuid
-import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+import boto3
 from app.config import get_settings
-from app.models import Cohort
-from app.db import Base
 
-DEFAULT_COHORT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+DEFAULT_COHORT_ID = "00000000-0000-0000-0000-000000000001"
 SURVEY_CONFIG_PATH = Path(__file__).resolve().parents[2] / "docs" / "survey-config" / "survey-en.json"
 
 
@@ -17,38 +16,64 @@ def _load_default_survey() -> dict:
         return json.load(f)
 
 
-async def seed():
+def seed(endpoint_url: str | None = None):
     settings = get_settings()
-    engine = create_async_engine(settings.async_database_url)
+    kwargs = {"region_name": settings.aws_region}
+    if endpoint_url:
+        kwargs["endpoint_url"] = endpoint_url
+    elif settings.dynamodb_endpoint_url:
+        kwargs["endpoint_url"] = settings.dynamodb_endpoint_url
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    dynamodb = boto3.resource("dynamodb", **kwargs)
+    table = dynamodb.Table(settings.surveys_table_name)
+
+    # Check if cohort already exists
+    result = table.get_item(Key={"pk": f"COHORT#{DEFAULT_COHORT_ID}", "sk": "METADATA"})
+    existing = result.get("Item")
 
     default_survey = _load_default_survey()
+    now = datetime.now(timezone.utc).isoformat()
 
-    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with session_factory() as session:
-        existing = await session.get(Cohort, DEFAULT_COHORT_ID)
-        if not existing:
-            cohort = Cohort(
-                id=DEFAULT_COHORT_ID,
-                name="Pilot Cohort 1",
-                course_name="Generative AI for Government",
-                survey_config=default_survey,
+    if not existing:
+        # Create cohort metadata
+        table.put_item(Item={
+            "pk": f"COHORT#{DEFAULT_COHORT_ID}",
+            "sk": "METADATA",
+            "cohort_id": DEFAULT_COHORT_ID,
+            "name": "Pilot Cohort 1",
+            "course_name": "Generative AI for Government",
+            "survey_config": default_survey,
+            "active_version": "v1",
+            "max_submissions_per_ip": 1,
+            "created_at": now,
+        })
+
+        # Create initial version
+        table.put_item(Item={
+            "pk": f"COHORT#{DEFAULT_COHORT_ID}",
+            "sk": "VERSION#v1",
+            "cohort_id": DEFAULT_COHORT_ID,
+            "version_label": "v1",
+            "config": default_survey,
+            "change_summary": "Initial survey configuration",
+            "created_by": "seed",
+            "created_at": now,
+        })
+
+        print(f"Seeded cohort: Pilot Cohort 1 ({DEFAULT_COHORT_ID})")
+    else:
+        if not existing.get("survey_config"):
+            table.update_item(
+                Key={"pk": f"COHORT#{DEFAULT_COHORT_ID}", "sk": "METADATA"},
+                UpdateExpression="SET survey_config = :config",
+                ExpressionAttributeValues={":config": default_survey},
             )
-            session.add(cohort)
-            await session.commit()
-            print(f"Seeded cohort: {cohort.name} ({cohort.id})")
+            print(f"Populated survey_config for: {existing.get('name')}")
         else:
-            if not existing.survey_config:
-                existing.survey_config = default_survey
-                await session.commit()
-                print(f"Populated survey_config for: {existing.name}")
-            else:
-                print(f"Cohort already exists: {existing.name}")
-
-    await engine.dispose()
+            print(f"Cohort already exists: {existing.get('name')}")
 
 
 if __name__ == "__main__":
-    asyncio.run(seed())
+    local = "--local" in sys.argv
+    endpoint = "http://localhost:8000" if local else None
+    seed(endpoint)

@@ -1,13 +1,15 @@
+"""Export service — generates CSV, PDF, and PPTX from DynamoDB submission data.
+
+All functions now receive pre-fetched submission dicts (from DynamoDB)
+instead of taking a database session.
+"""
 import io
 import csv
 import json
 import uuid
 from pathlib import Path
-from datetime import datetime
 from typing import Optional
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from app.models import Submission, Answer, Extraction, Cohort
+from app.dynamo import get_surveys_table
 
 SURVEY_CONFIG_PATH = Path(__file__).resolve().parents[4] / "docs" / "survey-config" / "survey-en.json"
 
@@ -23,26 +25,18 @@ def _load_questions() -> list[tuple[str, str]]:
     return [(q["id"], q["text"]) for q in config["questions"]]
 
 
-async def _build_cohort_lookup(
-    db: AsyncSession, submissions: list[Submission],
-) -> dict[uuid.UUID, tuple[str, str]]:
-    """Return {cohort_id: (course_name, survey_version)} for all submissions."""
-    cohort_ids = {sub.cohort_id for sub in submissions}
-    lookup: dict[uuid.UUID, tuple[str, str]] = {}
-    default_version = "1.0"
-    try:
-        default_version = _load_default_survey().get("version", "1.0")
-    except FileNotFoundError:
-        pass
-
-    for cid in cohort_ids:
-        cohort = await db.get(Cohort, cid)
-        if cohort:
-            version = cohort.survey_config.get("version", default_version) if cohort.survey_config else default_version
-            lookup[cid] = (cohort.course_name, version)
-        else:
-            lookup[cid] = ("", default_version)
-    return lookup
+def _get_cohort_info(cohort_id: Optional[uuid.UUID]) -> tuple[str, str]:
+    """Return (course_name, survey_version) for a cohort."""
+    if not cohort_id:
+        return ("", "1.0")
+    table = get_surveys_table()
+    result = table.get_item(Key={"pk": f"COHORT#{cohort_id}", "sk": "METADATA"})
+    item = result.get("Item")
+    if item:
+        config = item.get("survey_config") or {}
+        version = config.get("version", "1.0")
+        return (item.get("course_name", ""), version)
+    return ("", "1.0")
 
 
 def _format_answer(answer_raw: str | None, question_type: str | None = None) -> str:
@@ -58,57 +52,31 @@ def _format_answer(answer_raw: str | None, question_type: str | None = None) -> 
     return answer_raw
 
 
-async def _get_submissions(
-    db: AsyncSession,
-    cohort_id: Optional[uuid.UUID],
-    start: Optional[datetime],
-    end: Optional[datetime],
-) -> list[Submission]:
-    query = select(Submission).where(Submission.status == "completed")
-    if cohort_id:
-        query = query.where(Submission.cohort_id == cohort_id)
-    if start:
-        query = query.where(Submission.created_at >= start)
-    if end:
-        query = query.where(Submission.created_at <= end)
-    query = query.order_by(Submission.created_at)
-    result = await db.execute(query)
-    return list(result.scalars().all())
-
-
-async def generate_raw_csv(
-    db: AsyncSession,
+def generate_raw_csv(
+    submissions: list[dict],
     cohort_id: Optional[uuid.UUID] = None,
-    start: Optional[datetime] = None,
-    end: Optional[datetime] = None,
 ) -> str:
     questions = _load_questions()
-    submissions = await _get_submissions(db, cohort_id, start, end)
-    cohort_lookup = await _build_cohort_lookup(db, submissions)
+    course_name, default_version = _get_cohort_info(cohort_id)
 
-    all_rows: list[tuple[Submission, dict[str, Answer]]] = []
+    # Determine max followups per question
     max_followups: dict[str, int] = {qid: 0 for qid, _ in questions}
-
     for sub in submissions:
-        result = await db.execute(
-            select(Answer).where(Answer.submission_id == sub.id)
-        )
-        answers = {a.question_id: a for a in result.scalars().all()}
-        all_rows.append((sub, answers))
-
+        answers = {a["question_id"]: a for a in sub.get("answers", [])}
         for qid, _ in questions:
             a = answers.get(qid)
             if a:
                 count = 0
-                if a.followup_1:
+                if a.get("followup_1"):
                     count = 1
-                if a.followup_2:
+                if a.get("followup_2"):
                     count = 2
                 max_followups[qid] = max(max_followups[qid], count)
 
     output = io.StringIO()
     writer = csv.writer(output)
 
+    # Headers
     headers: list[str] = ["RespondentID", "CourseName", "SurveyVersion"]
     for i, (qid, _) in enumerate(questions, 1):
         headers.extend([f"Q{i}", f"A{i}", f"A{i}_Voice"])
@@ -116,19 +84,21 @@ async def generate_raw_csv(
             headers.extend([f"Q{i}_FQ{j}", f"Q{i}_FA{j}"])
     writer.writerow(headers)
 
-    for respondent_id, (sub, answers) in enumerate(all_rows, 1):
-        course_name, survey_version = cohort_lookup.get(sub.cohort_id, ("", "1.0"))
-        row: list[str] = [str(respondent_id), course_name, survey_version]
+    # Data rows
+    for respondent_id, sub in enumerate(submissions, 1):
+        answers = {a["question_id"]: a for a in sub.get("answers", [])}
+        sv = sub.get("survey_version") or default_version
+        row: list[str] = [str(respondent_id), course_name, sv]
         for qid, qtext in questions:
             a = answers.get(qid)
             row.append(qtext)
-            row.append(_format_answer(a.answer_raw if a else None, a.question_type if a else None))
-            row.append("Yes" if a and a.input_mode == "voice" else "No")
+            row.append(_format_answer(a.get("answer_raw") if a else None, a.get("question_type") if a else None))
+            row.append("Yes" if a and a.get("input_mode") == "voice" else "No")
             for j in range(1, max_followups[qid] + 1):
                 if a and j == 1:
-                    row.extend([a.followup_1 or "", a.followup_1_answer or ""])
+                    row.extend([a.get("followup_1") or "", a.get("followup_1_answer") or ""])
                 elif a and j == 2:
-                    row.extend([a.followup_2 or "", a.followup_2_answer or ""])
+                    row.extend([a.get("followup_2") or "", a.get("followup_2_answer") or ""])
                 else:
                     row.extend(["", ""])
         writer.writerow(row)
@@ -136,16 +106,13 @@ async def generate_raw_csv(
     return output.getvalue()
 
 
-async def generate_structured_csv(
-    db: AsyncSession,
+def generate_structured_csv(
+    submissions: list[dict],
     cohort_id: Optional[uuid.UUID] = None,
-    start: Optional[datetime] = None,
-    end: Optional[datetime] = None,
 ) -> str:
     questions = _load_questions()
     start_question_id = questions[0][0] if questions else None
-    submissions = await _get_submissions(db, cohort_id, start, end)
-    cohort_lookup = await _build_cohort_lookup(db, submissions)
+    course_name, default_version = _get_cohort_info(cohort_id)
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -154,11 +121,8 @@ async def generate_structured_csv(
     respondent_id = 0
 
     for sub in submissions:
-        result = await db.execute(
-            select(Answer).where(Answer.submission_id == sub.id)
-        )
-        answers = {a.question_id: a for a in result.scalars().all()}
-        course_name, survey_version = cohort_lookup.get(sub.cohort_id, ("", "1.0"))
+        answers = {a["question_id"]: a for a in sub.get("answers", [])}
+        sv = sub.get("survey_version") or default_version
 
         for qid, qtext in questions:
             a = answers.get(qid)
@@ -168,26 +132,26 @@ async def generate_structured_csv(
             if qid == start_question_id:
                 respondent_id += 1
 
-            main_answer = _format_answer(a.answer_raw, a.question_type)
+            main_answer = _format_answer(a.get("answer_raw"), a.get("question_type"))
 
             followup_qs: list[str] = []
             answer_parts: list[str] = [main_answer] if main_answer else []
 
-            if a.followup_1:
-                followup_qs.append(a.followup_1)
-                if a.followup_1_answer:
-                    answer_parts.append(a.followup_1_answer)
-            if a.followup_2:
-                followup_qs.append(a.followup_2)
-                if a.followup_2_answer:
-                    answer_parts.append(a.followup_2_answer)
+            if a.get("followup_1"):
+                followup_qs.append(a["followup_1"])
+                if a.get("followup_1_answer"):
+                    answer_parts.append(a["followup_1_answer"])
+            if a.get("followup_2"):
+                followup_qs.append(a["followup_2"])
+                if a.get("followup_2_answer"):
+                    answer_parts.append(a["followup_2_answer"])
 
-            voice_used = "Yes" if a.input_mode == "voice" else "No"
+            voice_used = "Yes" if a.get("input_mode") == "voice" else "No"
 
             writer.writerow([
                 respondent_id,
                 course_name,
-                survey_version,
+                sv,
                 qtext,
                 " | ".join(followup_qs),
                 " | ".join(answer_parts),
@@ -197,24 +161,23 @@ async def generate_structured_csv(
     return output.getvalue()
 
 
-async def _gather_report_data(
-    db: AsyncSession,
+def _gather_report_data(
+    submissions: list[dict],
     cohort_id: Optional[uuid.UUID],
-    start: Optional[datetime],
-    end: Optional[datetime],
 ) -> dict:
-    submissions = await _get_submissions(db, cohort_id, start, end)
-
     cohort_name = ""
     course_name = ""
     survey_version = "1.0"
+
     if cohort_id:
-        cohort = await db.get(Cohort, cohort_id)
-        if cohort:
-            cohort_name = cohort.name
-            course_name = cohort.course_name
-            if cohort.survey_config:
-                survey_version = cohort.survey_config.get("version", "1.0")
+        table = get_surveys_table()
+        result = table.get_item(Key={"pk": f"COHORT#{cohort_id}", "sk": "METADATA"})
+        item = result.get("Item")
+        if item:
+            cohort_name = item.get("name", "")
+            course_name = item.get("course_name", "")
+            config = item.get("survey_config") or {}
+            survey_version = config.get("version", "1.0")
 
     total = len(submissions)
     scores = []
@@ -224,28 +187,25 @@ async def _gather_report_data(
     stories: list[str] = []
 
     for sub in submissions:
-        result = await db.execute(
-            select(Answer).where(
-                Answer.submission_id == sub.id, Answer.question_id == "q1_recommend"
-            )
-        )
-        rec = result.scalar_one_or_none()
-        if rec and rec.answer_raw:
-            try:
-                scores.append(int(rec.answer_raw))
-            except ValueError:
-                pass
+        # Recommendation score
+        for a in sub.get("answers", []):
+            if a.get("question_id") == "q1_recommend" and a.get("answer_raw"):
+                try:
+                    scores.append(int(a["answer_raw"]))
+                except ValueError:
+                    pass
 
-        extraction = await db.get(Extraction, sub.id)
+        # Extraction data
+        extraction = sub.get("extraction")
         if extraction:
-            if extraction.top_themes:
-                all_themes.extend(extraction.top_themes)
-            if extraction.barriers:
-                all_barriers.extend(extraction.barriers)
-            if extraction.planned_task_or_workflow:
-                all_workflows.append(extraction.planned_task_or_workflow)
-            if extraction.success_story_candidate:
-                stories.append(extraction.success_story_candidate)
+            if extraction.get("top_themes"):
+                all_themes.extend(extraction["top_themes"])
+            if extraction.get("barriers"):
+                all_barriers.extend(extraction["barriers"])
+            if extraction.get("planned_task_or_workflow"):
+                all_workflows.append(extraction["planned_task_or_workflow"])
+            if extraction.get("success_story_candidate"):
+                stories.append(extraction["success_story_candidate"])
 
     theme_counts: dict[str, int] = {}
     for t in all_themes:
@@ -267,24 +227,20 @@ async def _gather_report_data(
         "top_barriers": top_barriers,
         "workflows": all_workflows[:10],
         "stories": stories[:6],
-        "start_date": start.strftime("%Y-%m-%d") if start else "All time",
-        "end_date": end.strftime("%Y-%m-%d") if end else "Present",
     }
 
 
-async def generate_summary_pdf(
-    db: AsyncSession,
+def generate_summary_pdf(
+    submissions: list[dict],
     cohort_id: Optional[uuid.UUID] = None,
-    start: Optional[datetime] = None,
-    end: Optional[datetime] = None,
 ) -> bytes:
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.colors import HexColor
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
     from reportlab.lib.units import inch
 
-    data = await _gather_report_data(db, cohort_id, start, end)
+    data = _gather_report_data(submissions, cohort_id)
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.75 * inch, bottomMargin=0.75 * inch)
@@ -304,7 +260,7 @@ async def generate_summary_pdf(
     elements.append(Paragraph("InnovateUS Feedback Summary", title_style))
     elements.append(Spacer(1, 12))
 
-    meta = f"Cohort: {data['cohort_name'] or 'All'} | Period: {data['start_date']} — {data['end_date']}"
+    meta = f"Cohort: {data['cohort_name'] or 'All'}"
     elements.append(Paragraph(meta, styles["Normal"]))
     if data["course_name"]:
         course_meta = f"Course: {data['course_name']} | Survey Version: {data['survey_version']}"
@@ -351,17 +307,15 @@ async def generate_summary_pdf(
     return buffer.getvalue()
 
 
-async def generate_summary_pptx(
-    db: AsyncSession,
+def generate_summary_pptx(
+    submissions: list[dict],
     cohort_id: Optional[uuid.UUID] = None,
-    start: Optional[datetime] = None,
-    end: Optional[datetime] = None,
 ) -> bytes:
     from pptx import Presentation
     from pptx.util import Inches, Pt
     from pptx.dml.color import RGBColor
 
-    data = await _gather_report_data(db, cohort_id, start, end)
+    data = _gather_report_data(submissions, cohort_id)
 
     prs = Presentation()
     prs.slide_width = Inches(13.333)
@@ -391,36 +345,29 @@ async def generate_summary_pptx(
                 p.text = bullet
                 p.font.size = Pt(18)
 
-    # Slide 1: Title
     cohort_label = data["cohort_name"] or "All Cohorts"
-    subtitle = f"{cohort_label} | {data['start_date']} — {data['end_date']}"
+    subtitle = cohort_label
     if data["course_name"]:
         subtitle += f"\nCourse: {data['course_name']} | Survey v{data['survey_version']}"
     add_title_slide("InnovateUS Feedback Summary", subtitle)
 
-    # Slide 2: Participation Metrics
     metrics_bullets = [f"Total Responses: {data['total_responses']}"]
     if data["avg_recommend"]:
         metrics_bullets.append(f"Average Recommendation Score: {data['avg_recommend']}/10")
     add_content_slide("Participation Metrics", metrics_bullets)
 
-    # Slide 3: What Learners Will Try
     workflows = data["workflows"][:6] or ["No data yet"]
     add_content_slide("What Learners Plan to Try", workflows)
 
-    # Slide 4: Barriers
     barrier_bullets = [f"{b} ({c})" for b, c in data["top_barriers"]] or ["No barriers reported"]
     add_content_slide("Barriers Identified", barrier_bullets)
 
-    # Slide 5: Success Stories
     story_bullets = [f'"{s}"' for s in data["stories"][:4]] or ["No success stories yet"]
     add_content_slide("Success Stories", story_bullets)
 
-    # Slide 6: Top Themes
     theme_bullets = [f"{t} ({c})" for t, c in data["top_themes"]] or ["No themes extracted"]
     add_content_slide("Top Themes", theme_bullets)
 
-    # Slide 7: Recommendations
     add_content_slide("Recommendations", [
         "Continue iterating on course content based on feedback",
         "Address identified barriers in future cohorts",
