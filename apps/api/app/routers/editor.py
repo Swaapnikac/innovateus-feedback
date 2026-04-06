@@ -1,11 +1,10 @@
 import json
 import uuid
 from pathlib import Path
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Response, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from app.db import get_db
-from app.models import Cohort, SurveyConfigVersion
+from boto3.dynamodb.conditions import Key
+from app.dynamo import get_surveys_table, query_all_items, DecimalEncoder, decimals_to_native
 from app.schemas import (
     EditorLoginRequest,
     AdminLoginResponse,
@@ -37,8 +36,8 @@ def _compute_change_summary(old_config: dict | None, new_config: dict) -> str:
     if old_config.get("title") != new_config.get("title"):
         changes.append("Changed survey title")
 
-    old_groups = json.dumps(old_config.get("question_groups", []), sort_keys=True)
-    new_groups = json.dumps(new_config.get("question_groups", []), sort_keys=True)
+    old_groups = json.dumps(old_config.get("question_groups", []), sort_keys=True, cls=DecimalEncoder)
+    new_groups = json.dumps(new_config.get("question_groups", []), sort_keys=True, cls=DecimalEncoder)
     if old_groups != new_groups:
         changes.append("Changed question groups")
 
@@ -60,7 +59,7 @@ def _compute_change_summary(old_config: dict | None, new_config: dict) -> str:
             changes.append(f"Changed text: {qid}")
         elif oq.get("type") != nq.get("type"):
             changes.append(f"Changed type: {qid}")
-        elif json.dumps(oq.get("options"), sort_keys=True) != json.dumps(nq.get("options"), sort_keys=True):
+        elif json.dumps(oq.get("options"), sort_keys=True, cls=DecimalEncoder) != json.dumps(nq.get("options"), sort_keys=True, cls=DecimalEncoder):
             changes.append(f"Changed options: {qid}")
         elif oq.get("group") != nq.get("group"):
             changes.append(f"Changed group: {qid}")
@@ -73,25 +72,39 @@ def _compute_change_summary(old_config: dict | None, new_config: dict) -> str:
     return "; ".join(changes) if changes else ""
 
 
+def _strip_none(obj):
+    """Recursively remove None values from dicts so DynamoDB round-trips compare equal."""
+    if isinstance(obj, dict):
+        return {k: _strip_none(v) for k, v in obj.items() if v is not None}
+    if isinstance(obj, list):
+        return [_strip_none(i) for i in obj]
+    return obj
+
+
 def _configs_equal(a: dict | None, b: dict) -> bool:
-    """Deep-compare two configs, ignoring key order."""
+    """Deep-compare two configs, ignoring key order and None fields."""
     if a is None:
         return False
-    return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+    a_clean = _strip_none(decimals_to_native(a))
+    b_clean = _strip_none(decimals_to_native(b))
+    return json.dumps(a_clean, sort_keys=True, cls=DecimalEncoder) == json.dumps(b_clean, sort_keys=True, cls=DecimalEncoder)
 
 
-async def _next_version_label(cohort_id: uuid.UUID, db: AsyncSession) -> str:
-    result = await db.execute(
-        select(func.count(SurveyConfigVersion.id)).where(
-            SurveyConfigVersion.cohort_id == cohort_id
-        )
+def _count_versions(table, cohort_id: uuid.UUID) -> int:
+    versions = query_all_items(
+        table,
+        KeyConditionExpression=Key("pk").eq(f"COHORT#{cohort_id}") & Key("sk").begins_with("VERSION#"),
     )
-    count = result.scalar() or 0
+    return len(versions)
+
+
+def _next_version_label(table, cohort_id: uuid.UUID) -> str:
+    count = _count_versions(table, cohort_id)
     return f"v{count + 1}"
 
 
 @router.post("/editor/login", response_model=AdminLoginResponse)
-async def editor_login(req: EditorLoginRequest, response: Response):
+def editor_login(req: EditorLoginRequest, response: Response):
     settings = get_settings()
     if not settings.editor_password_hash:
         raise HTTPException(status_code=500, detail="Editor password not configured")
@@ -111,13 +124,35 @@ async def editor_login(req: EditorLoginRequest, response: Response):
     return AdminLoginResponse(token=token)
 
 
+@router.get("/editor/cohorts", dependencies=[Depends(require_editor)])
+def editor_list_cohorts():
+    """List cohorts — accessible with editor credentials."""
+    from app.dynamo import scan_all_items
+    from boto3.dynamodb.conditions import Attr
+    table = get_surveys_table()
+    results = scan_all_items(table, FilterExpression=Attr("sk").eq("METADATA"))
+    cohorts = sorted(results, key=lambda x: x.get("created_at", ""), reverse=True)
+    return [
+        {
+            "id": c["cohort_id"],
+            "name": c["name"],
+            "course_name": c["course_name"],
+            "max_submissions_per_ip": int(c.get("max_submissions_per_ip", 1)),
+            "created_at": c["created_at"],
+        }
+        for c in cohorts
+    ]
+
+
 @router.get("/editor/survey/{cohort_id}", dependencies=[Depends(require_editor)])
-async def get_editor_survey(cohort_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    cohort = await db.get(Cohort, cohort_id)
+def get_editor_survey(cohort_id: uuid.UUID):
+    table = get_surveys_table()
+    result = table.get_item(Key={"pk": f"COHORT#{cohort_id}", "sk": "METADATA"})
+    cohort = result.get("Item")
     if not cohort:
         raise HTTPException(status_code=404, detail="Cohort not found")
 
-    config = cohort.survey_config
+    config = decimals_to_native(cohort.get("survey_config"))
     if not config:
         try:
             config = _load_default_survey()
@@ -127,44 +162,49 @@ async def get_editor_survey(cohort_id: uuid.UUID, db: AsyncSession = Depends(get
     return {
         "cohort_id": str(cohort_id),
         "survey": config,
-        "active_version": cohort.active_version,
+        "active_version": cohort.get("active_version"),
     }
 
 
 @router.put("/editor/survey/{cohort_id}", dependencies=[Depends(require_editor)])
-async def save_editor_survey(
-    cohort_id: uuid.UUID,
-    req: SaveSurveyRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    cohort = await db.get(Cohort, cohort_id)
+def save_editor_survey(cohort_id: uuid.UUID, req: SaveSurveyRequest):
+    table = get_surveys_table()
+    result = table.get_item(Key={"pk": f"COHORT#{cohort_id}", "sk": "METADATA"})
+    cohort = result.get("Item")
     if not cohort:
         raise HTTPException(status_code=404, detail="Cohort not found")
 
     new_config = req.model_dump()
 
-    if _configs_equal(cohort.survey_config, new_config):
+    if _configs_equal(decimals_to_native(cohort.get("survey_config")), new_config):
         return {
             "status": "no_changes",
             "cohort_id": str(cohort_id),
-            "version_label": cohort.active_version,
+            "version_label": cohort.get("active_version"),
         }
 
-    change_summary = _compute_change_summary(cohort.survey_config, new_config)
-    version_label = await _next_version_label(cohort_id, db)
+    change_summary = _compute_change_summary(decimals_to_native(cohort.get("survey_config")), new_config)
+    version_label = _next_version_label(table, cohort_id)
+    now = datetime.utcnow().isoformat()
 
-    version = SurveyConfigVersion(
-        cohort_id=cohort_id,
-        version_label=version_label,
-        config=new_config,
-        change_summary=change_summary or None,
-        created_by="editor",
+    # Create version record
+    table.put_item(Item={
+        "pk": f"COHORT#{cohort_id}",
+        "sk": f"VERSION#{version_label}",
+        "cohort_id": str(cohort_id),
+        "version_label": version_label,
+        "config": new_config,
+        "change_summary": change_summary or None,
+        "created_by": "editor",
+        "created_at": now,
+    })
+
+    # Update cohort metadata
+    table.update_item(
+        Key={"pk": f"COHORT#{cohort_id}", "sk": "METADATA"},
+        UpdateExpression="SET survey_config = :config, active_version = :ver",
+        ExpressionAttributeValues={":config": new_config, ":ver": version_label},
     )
-    db.add(version)
-
-    cohort.survey_config = new_config
-    cohort.active_version = version_label
-    await db.flush()
 
     return {
         "status": "saved",
@@ -174,42 +214,43 @@ async def save_editor_survey(
     }
 
 
-@router.get(
-    "/editor/survey/{cohort_id}/versions",
-    dependencies=[Depends(require_editor)],
-)
-async def list_versions(
+@router.get("/editor/survey/{cohort_id}/versions", dependencies=[Depends(require_editor)])
+def list_versions(
     cohort_id: uuid.UUID,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    db: AsyncSession = Depends(get_db),
 ):
-    cohort = await db.get(Cohort, cohort_id)
+    table = get_surveys_table()
+
+    # Check cohort exists
+    cohort_result = table.get_item(Key={"pk": f"COHORT#{cohort_id}", "sk": "METADATA"})
+    cohort = cohort_result.get("Item")
     if not cohort:
         raise HTTPException(status_code=404, detail="Cohort not found")
 
-    count_result = await db.execute(
-        select(func.count(SurveyConfigVersion.id)).where(
-            SurveyConfigVersion.cohort_id == cohort_id
-        )
+    # Get all versions
+    versions = query_all_items(
+        table,
+        KeyConditionExpression=Key("pk").eq(f"COHORT#{cohort_id}") & Key("sk").begins_with("VERSION#"),
     )
-    total = count_result.scalar() or 0
+    versions.sort(key=lambda x: x.get("created_at", ""), reverse=True)
 
-    result = await db.execute(
-        select(SurveyConfigVersion)
-        .where(SurveyConfigVersion.cohort_id == cohort_id)
-        .order_by(SurveyConfigVersion.created_at.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    )
-    versions = result.scalars().all()
+    total = len(versions)
+    start_idx = (page - 1) * page_size
+    page_items = versions[start_idx:start_idx + page_size]
 
     return {
         "items": [
-            SurveyVersionSummary.model_validate(v) for v in versions
+            SurveyVersionSummary(
+                version_label=v["version_label"],
+                change_summary=v.get("change_summary"),
+                created_at=datetime.fromisoformat(v["created_at"]),
+                created_by=v.get("created_by", "editor"),
+            )
+            for v in page_items
         ],
         "total": total,
-        "active_version": cohort.active_version,
+        "active_version": cohort.get("active_version"),
     }
 
 
@@ -218,61 +259,66 @@ async def list_versions(
     response_model=SurveyVersionDetail,
     dependencies=[Depends(require_editor)],
 )
-async def get_version(
-    cohort_id: uuid.UUID,
-    version_label: str,
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(
-        select(SurveyConfigVersion).where(
-            SurveyConfigVersion.cohort_id == cohort_id,
-            SurveyConfigVersion.version_label == version_label,
-        )
+def get_version(cohort_id: uuid.UUID, version_label: str):
+    table = get_surveys_table()
+    result = table.get_item(
+        Key={"pk": f"COHORT#{cohort_id}", "sk": f"VERSION#{version_label}"}
     )
-    version = result.scalar_one_or_none()
+    version = result.get("Item")
     if not version:
         raise HTTPException(status_code=404, detail="Version not found")
 
-    return SurveyVersionDetail.model_validate(version)
+    return SurveyVersionDetail(
+        version_label=version["version_label"],
+        change_summary=version.get("change_summary"),
+        created_at=datetime.fromisoformat(version["created_at"]),
+        created_by=version.get("created_by", "editor"),
+        config=decimals_to_native(version["config"]),
+    )
 
 
 @router.post(
     "/editor/survey/{cohort_id}/versions/{version_label}/restore",
     dependencies=[Depends(require_editor)],
 )
-async def restore_version(
-    cohort_id: uuid.UUID,
-    version_label: str,
-    db: AsyncSession = Depends(get_db),
-):
-    cohort = await db.get(Cohort, cohort_id)
+def restore_version(cohort_id: uuid.UUID, version_label: str):
+    table = get_surveys_table()
+
+    # Check cohort
+    cohort_result = table.get_item(Key={"pk": f"COHORT#{cohort_id}", "sk": "METADATA"})
+    cohort = cohort_result.get("Item")
     if not cohort:
         raise HTTPException(status_code=404, detail="Cohort not found")
 
-    result = await db.execute(
-        select(SurveyConfigVersion).where(
-            SurveyConfigVersion.cohort_id == cohort_id,
-            SurveyConfigVersion.version_label == version_label,
-        )
+    # Get old version
+    version_result = table.get_item(
+        Key={"pk": f"COHORT#{cohort_id}", "sk": f"VERSION#{version_label}"}
     )
-    old_version = result.scalar_one_or_none()
+    old_version = version_result.get("Item")
     if not old_version:
         raise HTTPException(status_code=404, detail="Version not found")
 
-    new_label = await _next_version_label(cohort_id, db)
+    new_label = _next_version_label(table, cohort_id)
+    now = datetime.utcnow().isoformat()
 
-    new_version = SurveyConfigVersion(
-        cohort_id=cohort_id,
-        version_label=new_label,
-        config=old_version.config,
-        change_summary=f"Restored from {version_label}",
-        created_by="editor",
+    # Create new version from restored config
+    table.put_item(Item={
+        "pk": f"COHORT#{cohort_id}",
+        "sk": f"VERSION#{new_label}",
+        "cohort_id": str(cohort_id),
+        "version_label": new_label,
+        "config": old_version["config"],
+        "change_summary": f"Restored from {version_label}",
+        "created_by": "editor",
+        "created_at": now,
+    })
+
+    # Update cohort metadata
+    table.update_item(
+        Key={"pk": f"COHORT#{cohort_id}", "sk": "METADATA"},
+        UpdateExpression="SET survey_config = :config, active_version = :ver",
+        ExpressionAttributeValues={":config": old_version["config"], ":ver": new_label},
     )
-    db.add(new_version)
-
-    cohort.survey_config = old_version.config
-    cohort.active_version = new_label
-    await db.flush()
 
     return {
         "status": "restored",

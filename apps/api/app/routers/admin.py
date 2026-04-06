@@ -5,10 +5,8 @@ from typing import Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, case
-from app.db import get_db
-from app.models import Submission, Answer, Extraction, Cohort, SurveyConfigVersion
+from boto3.dynamodb.conditions import Key, Attr
+from app.dynamo import get_surveys_table, get_submissions_table, query_all_items, scan_all_items, decimals_to_native
 from app.schemas import (
     AdminLoginRequest,
     AdminLoginResponse,
@@ -30,9 +28,11 @@ from app.services.export_service import (
 
 router = APIRouter()
 
+DEFAULT_SURVEY_PATH = Path(__file__).resolve().parents[4] / "docs" / "survey-config" / "survey-en.json"
+
 
 @router.post("/login", response_model=AdminLoginResponse)
-async def admin_login(req: AdminLoginRequest, response: Response):
+def admin_login(req: AdminLoginRequest, response: Response):
     settings = get_settings()
     if not settings.admin_password_hash:
         raise HTTPException(status_code=500, detail="Admin password not configured")
@@ -53,102 +53,154 @@ async def admin_login(req: AdminLoginRequest, response: Response):
 
 
 @router.get("/cohorts", dependencies=[Depends(require_admin)])
-async def list_cohorts(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Cohort).order_by(Cohort.created_at.desc()))
-    cohorts = result.scalars().all()
-    return [CohortResponse.model_validate(c) for c in cohorts]
-
-
-DEFAULT_SURVEY_PATH = Path(__file__).resolve().parents[3] / "docs" / "survey-config" / "survey-en.json"
+def list_cohorts():
+    table = get_surveys_table()
+    # Scan for all METADATA items
+    results = scan_all_items(
+        table,
+        FilterExpression=Attr("sk").eq("METADATA"),
+    )
+    cohorts = sorted(results, key=lambda x: x.get("created_at", ""), reverse=True)
+    return [
+        CohortResponse(
+            id=uuid.UUID(c["cohort_id"]),
+            name=c["name"],
+            course_name=c["course_name"],
+            max_submissions_per_ip=int(c.get("max_submissions_per_ip", 1)),
+            created_at=datetime.fromisoformat(c["created_at"]),
+        )
+        for c in cohorts
+    ]
 
 
 @router.post("/cohorts", response_model=CohortResponse, dependencies=[Depends(require_admin)])
-async def create_cohort(req: CreateCohortRequest, db: AsyncSession = Depends(get_db)):
-    default_config: dict | None = None
+def create_cohort(req: CreateCohortRequest):
+    table = get_surveys_table()
+    cohort_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+
+    default_config = None
     if DEFAULT_SURVEY_PATH.exists():
         default_config = json.loads(DEFAULT_SURVEY_PATH.read_text(encoding="utf-8"))
 
-    cohort = Cohort(
+    # Create cohort metadata
+    table.put_item(Item={
+        "pk": f"COHORT#{cohort_id}",
+        "sk": "METADATA",
+        "cohort_id": cohort_id,
+        "name": req.name,
+        "course_name": req.course_name,
+        "survey_config": default_config,
+        "active_version": "v1",
+        "max_submissions_per_ip": 1,
+        "created_at": now,
+    })
+
+    # Create initial version
+    if default_config:
+        table.put_item(Item={
+            "pk": f"COHORT#{cohort_id}",
+            "sk": "VERSION#v1",
+            "cohort_id": cohort_id,
+            "version_label": "v1",
+            "config": default_config,
+            "change_summary": "Initial survey configuration",
+            "created_by": "admin",
+            "created_at": now,
+        })
+
+    return CohortResponse(
+        id=uuid.UUID(cohort_id),
         name=req.name,
         course_name=req.course_name,
-        survey_config=default_config,
-        active_version="v1",
+        max_submissions_per_ip=1,
+        created_at=datetime.fromisoformat(now),
     )
-    db.add(cohort)
-    await db.flush()
-
-    if default_config:
-        version = SurveyConfigVersion(
-            cohort_id=cohort.id,
-            version_label="v1",
-            config=default_config,
-            change_summary="Initial survey configuration",
-            created_by="admin",
-        )
-        db.add(version)
-        await db.flush()
-
-    return CohortResponse.model_validate(cohort)
 
 
-@router.get("/metrics", response_model=MetricsResponse, dependencies=[Depends(require_admin)])
-async def get_metrics(
+def _get_submissions_for_filters(
     cohort_id: Optional[uuid.UUID] = None,
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
     survey_version: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
-):
-    def _apply_filters(query):
-        if cohort_id:
-            query = query.where(Submission.cohort_id == cohort_id)
-        if start:
-            query = query.where(Submission.created_at >= start)
-        if end:
-            query = query.where(Submission.created_at <= end)
-        if survey_version:
-            query = query.where(Submission.survey_version == survey_version)
-        return query
+) -> list[dict]:
+    """Fetch submissions matching the given filters."""
+    subs_table = get_submissions_table()
 
-    result = await db.execute(_apply_filters(select(Submission)))
-    submissions = result.scalars().all()
+    if cohort_id:
+        # Query by cohort (efficient — uses partition key)
+        items = query_all_items(
+            subs_table,
+            KeyConditionExpression=Key("pk").eq(f"COHORT#{cohort_id}"),
+        )
+    else:
+        # Scan all submissions
+        items = scan_all_items(
+            subs_table,
+            FilterExpression=Attr("sk").begins_with("SUB#"),
+        )
+
+    # Apply filters in Python
+    filtered = []
+    for item in items:
+        if not item.get("sk", "").startswith("SUB#"):
+            continue
+        # Skip empty in-progress submissions (no answers and not completed)
+        if item.get("status") == "started" and not item.get("answers"):
+            continue
+        if start and item.get("created_at", "") < start.isoformat():
+            continue
+        if end and item.get("created_at", "") > end.isoformat():
+            continue
+        if survey_version and item.get("survey_version") != survey_version:
+            continue
+        filtered.append(decimals_to_native(item))
+
+    return filtered
+
+
+@router.get("/metrics", response_model=MetricsResponse, dependencies=[Depends(require_admin)])
+def get_metrics(
+    cohort_id: Optional[uuid.UUID] = None,
+    start: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    survey_version: Optional[str] = None,
+):
+    submissions = _get_submissions_for_filters(cohort_id, start, end, survey_version)
 
     total = len(submissions)
-    completed = [s for s in submissions if s.status == "completed"]
+    completed = [s for s in submissions if s.get("status") == "completed"]
     completion_rate = len(completed) / total if total > 0 else 0
 
-    times = [s.time_to_complete_sec for s in completed if s.time_to_complete_sec]
+    times = [int(s["time_to_complete_sec"]) for s in completed if s.get("time_to_complete_sec")]
     avg_time = sum(times) / len(times) if times else None
 
-    answer_query = _apply_filters(
-        select(Answer).join(Submission).where(Answer.question_id == "q1_recommend")
-    )
-    result = await db.execute(answer_query)
-    recommend_answers = result.scalars().all()
+    # Recommendation scores
     scores = []
-    for a in recommend_answers:
-        try:
-            scores.append(int(a.answer_raw))
-        except (ValueError, TypeError):
-            pass
+    for sub in submissions:
+        for a in sub.get("answers", []):
+            if a.get("question_id") == "q1_recommend":
+                try:
+                    scores.append(int(a["answer_raw"]))
+                except (ValueError, TypeError, KeyError):
+                    pass
     avg_score = sum(scores) / len(scores) if scores else None
 
-    confidence_query = _apply_filters(
-        select(Answer).join(Submission).where(Answer.question_id == "q2_confidence")
-    )
-    result = await db.execute(confidence_query)
-    confidence_answers = result.scalars().all()
+    # Confidence distribution
     conf_dist: dict[str, int] = {}
-    for a in confidence_answers:
-        val = a.answer_raw or "Unknown"
-        conf_dist[val] = conf_dist.get(val, 0) + 1
+    for sub in submissions:
+        for a in sub.get("answers", []):
+            if a.get("question_id") == "q2_confidence":
+                val = a.get("answer_raw") or "Unknown"
+                conf_dist[val] = conf_dist.get(val, 0) + 1
 
-    open_query = _apply_filters(
-        select(Answer).join(Submission).where(Answer.question_type == "open")
-    )
-    result = await db.execute(open_query)
-    open_answers = result.scalars().all()
-    vague_count = sum(1 for a in open_answers if a.is_vague is True)
+    # Vagueness rate
+    open_answers = []
+    for sub in submissions:
+        for a in sub.get("answers", []):
+            if a.get("question_type") == "open":
+                open_answers.append(a)
+    vague_count = sum(1 for a in open_answers if a.get("is_vague") is True)
     vagueness_rate = vague_count / len(open_answers) if open_answers else None
 
     return MetricsResponse(
@@ -163,86 +215,65 @@ async def get_metrics(
 
 
 @router.get("/responses", response_model=PaginatedResponses, dependencies=[Depends(require_admin)])
-async def get_responses(
+def get_responses(
     cohort_id: Optional[uuid.UUID] = None,
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
     survey_version: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db),
 ):
-    query = select(Submission)
-    count_query = select(func.count(Submission.id))
+    submissions = _get_submissions_for_filters(cohort_id, start, end, survey_version)
+    submissions.sort(key=lambda x: x.get("created_at", ""), reverse=True)
 
-    if cohort_id:
-        query = query.where(Submission.cohort_id == cohort_id)
-        count_query = count_query.where(Submission.cohort_id == cohort_id)
-    if start:
-        query = query.where(Submission.created_at >= start)
-        count_query = count_query.where(Submission.created_at >= start)
-    if end:
-        query = query.where(Submission.created_at <= end)
-        count_query = count_query.where(Submission.created_at <= end)
-    if survey_version:
-        query = query.where(Submission.survey_version == survey_version)
-        count_query = count_query.where(Submission.survey_version == survey_version)
-
-    total_result = await db.execute(count_query)
-    total = total_result.scalar() or 0
-
-    query = query.order_by(Submission.created_at.desc())
-    query = query.offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(query)
-    submissions = result.scalars().all()
+    total = len(submissions)
+    start_idx = (page - 1) * page_size
+    page_items = submissions[start_idx:start_idx + page_size]
 
     items = []
-    for sub in submissions:
-        answers_result = await db.execute(
-            select(Answer).where(Answer.submission_id == sub.id)
-        )
-        answers = answers_result.scalars().all()
+    for sub in page_items:
+        native_answers = decimals_to_native(sub.get("answers", []))
+        answers_list = [
+            {
+                "question_id": a.get("question_id"),
+                "question_type": a.get("question_type"),
+                "answer_raw": a.get("answer_raw"),
+                "input_mode": a.get("input_mode"),
+                "is_vague": a.get("is_vague"),
+                "followup_1": a.get("followup_1"),
+                "followup_1_answer": a.get("followup_1_answer"),
+                "followup_2": a.get("followup_2"),
+                "followup_2_answer": a.get("followup_2_answer"),
+            }
+            for a in native_answers
+        ]
 
-        extraction = await db.get(Extraction, sub.id)
+        extraction = decimals_to_native(sub.get("extraction"))
+        extraction_dict = None
+        if extraction:
+            extraction_dict = {
+                "what_was_tried": extraction.get("what_was_tried"),
+                "planned_task_or_workflow": extraction.get("planned_task_or_workflow"),
+                "outcome_or_expected_outcome": extraction.get("outcome_or_expected_outcome"),
+                "barriers": extraction.get("barriers"),
+                "enablers": extraction.get("enablers"),
+                "public_benefit": extraction.get("public_benefit"),
+                "top_themes": extraction.get("top_themes"),
+                "success_story_candidate": extraction.get("success_story_candidate"),
+            }
 
         items.append(
             SubmissionSummary(
-                id=sub.id,
-                cohort_id=sub.cohort_id,
-                created_at=sub.created_at,
-                completed_at=sub.completed_at,
-                status=sub.status,
-                time_to_complete_sec=sub.time_to_complete_sec,
-                survey_version=sub.survey_version,
-                ip_hash=sub.ip_hash,
-                answers=[
-                    {
-                        "question_id": a.question_id,
-                        "question_type": a.question_type,
-                        "answer_raw": a.answer_raw,
-                        "input_mode": a.input_mode,
-                        "is_vague": a.is_vague,
-                        "followup_1": a.followup_1,
-                        "followup_1_answer": a.followup_1_answer,
-                        "followup_2": a.followup_2,
-                        "followup_2_answer": a.followup_2_answer,
-                    }
-                    for a in answers
-                ],
-                extraction=(
-                    {
-                        "what_was_tried": extraction.what_was_tried,
-                        "planned_task_or_workflow": extraction.planned_task_or_workflow,
-                        "outcome_or_expected_outcome": extraction.outcome_or_expected_outcome,
-                        "barriers": extraction.barriers,
-                        "enablers": extraction.enablers,
-                        "public_benefit": extraction.public_benefit,
-                        "top_themes": extraction.top_themes,
-                        "success_story_candidate": extraction.success_story_candidate,
-                    }
-                    if extraction
-                    else None
-                ),
+                id=uuid.UUID(sub["submission_id"]),
+                cohort_id=uuid.UUID(sub["cohort_id"]),
+                created_at=datetime.fromisoformat(sub["created_at"]),
+                completed_at=datetime.fromisoformat(sub["completed_at"]) if sub.get("completed_at") else None,
+                status=sub["status"],
+                time_to_complete_sec=int(sub["time_to_complete_sec"]) if sub.get("time_to_complete_sec") else None,
+                survey_version=sub.get("survey_version"),
+                ip_hash=sub.get("ip_hash"),
+                answers=answers_list,
+                extraction=extraction_dict,
             )
         )
 
@@ -250,13 +281,15 @@ async def get_responses(
 
 
 @router.get("/export/raw.csv", dependencies=[Depends(require_admin)])
-async def export_raw_csv(
+def export_raw_csv(
     cohort_id: Optional[uuid.UUID] = None,
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
-    db: AsyncSession = Depends(get_db),
 ):
-    csv_data = await generate_raw_csv(db, cohort_id, start, end)
+    submissions = _get_submissions_for_filters(cohort_id, start, end)
+    completed = [s for s in submissions if s.get("status") == "completed"]
+    completed.sort(key=lambda x: x.get("created_at", ""))
+    csv_data = generate_raw_csv(completed, cohort_id)
     return StreamingResponse(
         iter([csv_data]),
         media_type="text/csv",
@@ -265,13 +298,15 @@ async def export_raw_csv(
 
 
 @router.get("/export/structured.csv", dependencies=[Depends(require_admin)])
-async def export_structured_csv(
+def export_structured_csv(
     cohort_id: Optional[uuid.UUID] = None,
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
-    db: AsyncSession = Depends(get_db),
 ):
-    csv_data = await generate_structured_csv(db, cohort_id, start, end)
+    submissions = _get_submissions_for_filters(cohort_id, start, end)
+    completed = [s for s in submissions if s.get("status") == "completed"]
+    completed.sort(key=lambda x: x.get("created_at", ""))
+    csv_data = generate_structured_csv(completed, cohort_id)
     return StreamingResponse(
         iter([csv_data]),
         media_type="text/csv",
@@ -280,13 +315,14 @@ async def export_structured_csv(
 
 
 @router.get("/export/summary.pdf", dependencies=[Depends(require_admin)])
-async def export_summary_pdf(
+def export_summary_pdf(
     cohort_id: Optional[uuid.UUID] = None,
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
-    db: AsyncSession = Depends(get_db),
 ):
-    pdf_bytes = await generate_summary_pdf(db, cohort_id, start, end)
+    submissions = _get_submissions_for_filters(cohort_id, start, end)
+    completed = [s for s in submissions if s.get("status") == "completed"]
+    pdf_bytes = generate_summary_pdf(completed, cohort_id)
     return StreamingResponse(
         iter([pdf_bytes]),
         media_type="application/pdf",
@@ -295,13 +331,14 @@ async def export_summary_pdf(
 
 
 @router.get("/export/summary.pptx", dependencies=[Depends(require_admin)])
-async def export_summary_pptx(
+def export_summary_pptx(
     cohort_id: Optional[uuid.UUID] = None,
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
-    db: AsyncSession = Depends(get_db),
 ):
-    pptx_bytes = await generate_summary_pptx(db, cohort_id, start, end)
+    submissions = _get_submissions_for_filters(cohort_id, start, end)
+    completed = [s for s in submissions if s.get("status") == "completed"]
+    pptx_bytes = generate_summary_pptx(completed, cohort_id)
     return StreamingResponse(
         iter([pptx_bytes]),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -310,45 +347,48 @@ async def export_summary_pptx(
 
 
 @router.delete("/responses", dependencies=[Depends(require_admin)])
-async def delete_all_responses(
-    cohort_id: Optional[uuid.UUID] = None,
-    db: AsyncSession = Depends(get_db),
-):
-    from sqlalchemy import delete
+def delete_all_responses(cohort_id: Optional[uuid.UUID] = None):
+    subs_table = get_submissions_table()
 
-    sub_query = select(Submission.id)
     if cohort_id:
-        sub_query = sub_query.where(Submission.cohort_id == cohort_id)
-    sub_ids = (await db.execute(sub_query)).scalars().all()
+        items = query_all_items(
+            subs_table,
+            KeyConditionExpression=Key("pk").eq(f"COHORT#{cohort_id}"),
+        )
+    else:
+        items = scan_all_items(
+            subs_table,
+            FilterExpression=Attr("sk").begins_with("SUB#"),
+        )
 
-    if not sub_ids:
+    if not items:
         return {"status": "ok", "deleted": 0}
 
-    await db.execute(delete(Extraction).where(Extraction.submission_id.in_(sub_ids)))
-    await db.execute(delete(Answer).where(Answer.submission_id.in_(sub_ids)))
-    await db.execute(delete(Submission).where(Submission.id.in_(sub_ids)))
-    await db.flush()
+    # Batch delete
+    with subs_table.batch_writer() as batch:
+        for item in items:
+            batch.delete_item(Key={"pk": item["pk"], "sk": item["sk"]})
 
-    return {"status": "ok", "deleted": len(sub_ids)}
+    return {"status": "ok", "deleted": len(items)}
 
 
 @router.post("/cohorts/{cohort_id}/settings", dependencies=[Depends(require_admin)])
-async def update_cohort_settings(
-    cohort_id: uuid.UUID,
-    req: CohortSettingsRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    cohort = await db.get(Cohort, cohort_id)
-    if not cohort:
+def update_cohort_settings(cohort_id: uuid.UUID, req: CohortSettingsRequest):
+    table = get_surveys_table()
+    result = table.get_item(Key={"pk": f"COHORT#{cohort_id}", "sk": "METADATA"})
+    if not result.get("Item"):
         raise HTTPException(status_code=404, detail="Cohort not found")
 
-    cohort.max_submissions_per_ip = req.max_submissions_per_ip
-    await db.flush()
-    return {"status": "updated", "max_submissions_per_ip": cohort.max_submissions_per_ip}
+    table.update_item(
+        Key={"pk": f"COHORT#{cohort_id}", "sk": "METADATA"},
+        UpdateExpression="SET max_submissions_per_ip = :val",
+        ExpressionAttributeValues={":val": req.max_submissions_per_ip},
+    )
+    return {"status": "updated", "max_submissions_per_ip": req.max_submissions_per_ip}
 
 
 @router.get("/qualtrics/status", dependencies=[Depends(require_admin)])
-async def qualtrics_status():
+def qualtrics_status():
     s = get_settings()
     configured = bool(s.qualtrics_api_token and s.qualtrics_survey_id and s.qualtrics_datacenter_id)
     return {
@@ -359,12 +399,9 @@ async def qualtrics_status():
 
 
 @router.post("/qualtrics/sync/{submission_id}", dependencies=[Depends(require_admin)])
-async def qualtrics_sync_one(
-    submission_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-):
+async def qualtrics_sync_one(submission_id: uuid.UUID):
     from app.services.qualtrics_service import sync_submission
-    result = await sync_submission(submission_id, db, force=True)
+    result = await sync_submission(submission_id, force=True)
     status_code = "ok" if result["success"] else "error"
     return {"status": status_code, "submission_id": str(submission_id), "error": result.get("error")}
 
@@ -373,18 +410,21 @@ async def qualtrics_sync_one(
 async def qualtrics_sync_all(
     cohort_id: Optional[uuid.UUID] = None,
     force: bool = Query(False),
-    db: AsyncSession = Depends(get_db),
 ):
     from app.services.qualtrics_service import sync_submission
 
-    query = select(Submission).where(Submission.status == "completed")
-    if not force:
-        query = query.where(Submission.qualtrics_synced_at.is_(None))
+    subs_table = get_submissions_table()
     if cohort_id:
-        query = query.where(Submission.cohort_id == cohort_id)
+        items = query_all_items(
+            subs_table,
+            KeyConditionExpression=Key("pk").eq(f"COHORT#{cohort_id}"),
+        )
+    else:
+        items = scan_all_items(subs_table, FilterExpression=Attr("sk").begins_with("SUB#"))
 
-    result = await db.execute(query)
-    submissions = result.scalars().all()
+    submissions = [s for s in items if s.get("status") == "completed"]
+    if not force:
+        submissions = [s for s in submissions if not s.get("qualtrics_synced_at")]
 
     total = len(submissions)
     synced = 0
@@ -392,11 +432,12 @@ async def qualtrics_sync_all(
     errors: list[dict] = []
 
     for sub in submissions:
-        sync_result = await sync_submission(sub.id, db, force=True)
+        sub_id = uuid.UUID(sub["submission_id"])
+        sync_result = await sync_submission(sub_id, force=True)
         if sync_result["success"]:
             synced += 1
         else:
             failed += 1
-            errors.append({"submission_id": str(sub.id), "error": sync_result.get("error")})
+            errors.append({"submission_id": str(sub_id), "error": sync_result.get("error")})
 
     return {"total": total, "synced": synced, "failed": failed, "errors": errors}

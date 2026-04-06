@@ -1,14 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from mangum import Mangum
 from app.config import get_settings
-from app.routers import survey, submissions, transcribe, ai, admin, editor
+from app.routers import survey, submissions, transcribe, ai, admin, editor, jotform
 
 settings = get_settings()
 
-# Strip whitespace — "https://a.com, https://b.com" must not leave leading spaces on origins
 _cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 
-app = FastAPI(title="InnovateUS Feedback API", version="1.0.0")
+app = FastAPI(title="InnovateUS Feedback API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,13 +24,18 @@ app.include_router(transcribe.router, prefix="/v1", tags=["transcribe"])
 app.include_router(ai.router, prefix="/v1", tags=["ai"])
 app.include_router(admin.router, prefix="/v1/admin", tags=["admin"])
 app.include_router(editor.router, prefix="/v1/admin", tags=["editor"])
+app.include_router(jotform.router, prefix="/v1/admin", tags=["jotform"])
 
 
 @app.get("/")
-async def root():
-    return {"service": "InnovateUS Feedback API", "status": "ok", "docs": "/docs"}
+def root():
+    return {"service": "InnovateUS Feedback API", "version": "2.0.0", "database": "DynamoDB", "docs": "/docs"}
 
 
 @app.get("/health")
-async def health():
+def health():
     return {"status": "ok"}
+
+
+# AWS Lambda handler via Mangum
+handler = Mangum(app)
