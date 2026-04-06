@@ -56,10 +56,13 @@ async def require_admin(request: Request):
 
 
 async def require_editor(request: Request):
+    # Try editor token first, fall back to admin token (admins can also edit)
     token = _extract_token(request, "editor_token")
+    if not token:
+        token = _extract_token(request, "admin_token")
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     payload = verify_token(token)
-    if payload.get("role") != "editor":
+    if payload.get("role") not in ("editor", "manager"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Editor access required")
     return payload

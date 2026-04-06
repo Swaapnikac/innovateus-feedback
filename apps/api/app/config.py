@@ -2,9 +2,14 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/innovateus"
-    database_url_sync: str = ""
+    # AWS
+    aws_region: str = "us-east-1"
+    dynamodb_endpoint_url: str = ""  # Set to "http://localhost:8000" for DynamoDB Local
+    surveys_table_name: str = "innovateus-surveys"
+    submissions_table_name: str = "innovateus-submissions"
+    # OpenAI
     openai_api_key: str = ""
+    # Auth
     jwt_secret: str = "change-me-in-production"
     admin_password_hash: str = ""
     editor_password_hash: str = ""
@@ -16,32 +21,11 @@ class Settings(BaseSettings):
     jotform_api_key: str = ""
     jotform_form_id: str = ""
     jotform_api_url: str = "https://api.jotform.com"
-    cors_origins: str = "http://localhost:3000"
+    # App
+    cors_origins: str = "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003"
     environment: str = "development"
 
     model_config = {"env_file": "../../.env", "env_file_encoding": "utf-8", "extra": "ignore", "env_ignore_empty": True}
-
-    @property
-    def async_database_url(self) -> str:
-        url = self.database_url
-        if url.startswith("postgresql://"):
-            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-        elif not url.startswith("postgresql+asyncpg://"):
-            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
-        return url
-
-    @property
-    def sync_database_url(self) -> str:
-        if self.database_url_sync:
-            return self.database_url_sync
-        url = self.database_url
-        if "asyncpg" in url:
-            url = url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
-        elif url.startswith("postgresql://"):
-            url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
-        else:
-            url = url.replace("postgres://", "postgresql+psycopg2://", 1)
-        return url
 
 
 _settings_instance = None

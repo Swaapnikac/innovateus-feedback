@@ -129,7 +129,6 @@ class SubmissionSummary(BaseModel):
     answers: list[dict] = []
     extraction: Optional[dict] = None
 
-    model_config = {"from_attributes": True}
 
 
 class PaginatedResponses(BaseModel):
@@ -145,8 +144,6 @@ class CohortResponse(BaseModel):
     course_name: str
     max_submissions_per_ip: int = 1
     created_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 class CreateCohortRequest(BaseModel):
@@ -175,7 +172,6 @@ class SurveyVersionSummary(BaseModel):
     created_at: datetime
     created_by: str
 
-    model_config = {"from_attributes": True}
 
 
 class SurveyVersionDetail(SurveyVersionSummary):
