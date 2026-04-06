@@ -36,3 +36,6 @@ npm-debug.log*
 
 # Office temp lock files
 ~$*
+
+# Local comparison docs
+docs/DATABASE_COMPARISON_RDS_vs_DynamoDB.docx
