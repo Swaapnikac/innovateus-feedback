@@ -53,6 +53,7 @@ import {
 } from "lucide-react";
 import { api, type ExtractionResult } from "@/lib/api";
 import { InnovateLogo } from "@/components/InnovateLogo";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
 interface ResponseItem {
   id: string;
@@ -103,6 +104,8 @@ export default function DashboardPage() {
   const [creating, setCreating] = useState(false);
   const [createdCohortId, setCreatedCohortId] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [analytics, setAnalytics] = useState<any>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -114,13 +117,24 @@ export default function DashboardPage() {
         survey_version: versionFilter || undefined,
       };
 
-      const [metricsData, responsesData] = await Promise.all([
+      const [metricsData, responsesData, analyticsData] = await Promise.all([
         api.getMetrics(params),
         api.getResponses({ ...params, page, page_size: 10 }),
+        api.getAnalytics({ cohort_id: cohortId, start: startDate || undefined, end: endDate || undefined }).catch(() => ({
+          funnel: { page_views_landing: 0, page_views_consent: 0, survey_starts: 0, survey_in_progress: 0, survey_completed: 0, dropout_rate: 0 },
+          per_question_dropout: [],
+          voice_vs_text: { total_open_answers: 0, voice_count: 0, text_count: 0, voice_percentage: 0, per_question: [] },
+          followup_effectiveness: { total_vague_detected: 0, followups_shown: 0, followups_answered: 0, followups_skipped: 0, answer_rate: 0 },
+          voice_vs_text_quality: { voice_vague_rate: 0, text_vague_rate: 0, voice_avg_length: 0, text_avg_length: 0 },
+          review_edits: { total_reviews: 0, reviews_with_edits: 0, edit_rate: 0, edits_per_question: [] },
+          experience_rating: { total_ratings: 0, avg_rating: null, distribution: { "1": 0, "2": 0, "3": 0, "4": 0, "5": 0 }, response_rate: 0 },
+          time_metrics: { avg_total_sec: null, median_total_sec: null, total_question_answers: 0 },
+        })),
       ]);
 
       setMetrics(metricsData);
       setResponses(responsesData);
+      setAnalytics(analyticsData);
     } catch {
       router.push("/admin/login");
     } finally {
@@ -238,13 +252,6 @@ export default function DashboardPage() {
   const topThemes = Object.entries(allThemes).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const topBarriers = Object.entries(allBarriers).sort((a, b) => b[1] - a[1]).slice(0, 6);
 
-  const ipHashCounts: Record<string, number> = {};
-  responses?.items.forEach((item) => {
-    if (item.ip_hash) {
-      ipHashCounts[item.ip_hash] = (ipHashCounts[item.ip_hash] || 0) + 1;
-    }
-  });
-
   if (loading) {
     return (
       <div className="min-h-screen bg-brand-light-blue/40 flex items-center justify-center">
@@ -262,19 +269,19 @@ export default function DashboardPage() {
           <span className="text-xs font-semibold text-[#124D8F]/40 uppercase tracking-widest">Dashboard</span>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" onClick={() => setShowNewProgram(true)} className="rounded-full bg-brand-blue hover:bg-brand-blue/90 gap-2">
+          <Button size="sm" onClick={() => setShowNewProgram(true)} className="bg-brand-blue hover:bg-brand-blue/90 gap-2">
             <Plus className="h-4 w-4" />
             New Program
           </Button>
-          <Button variant="outline" size="sm" onClick={() => router.push("/admin/pipelines")} className="rounded-full border-brand-teal/20 text-brand-teal hover:bg-brand-teal/5 gap-2">
+          <Button variant="outline" size="sm" onClick={() => router.push("/admin/pipelines")} className="border-brand-teal/20 text-brand-teal hover:bg-brand-teal/5 gap-2">
             <GitBranch className="h-4 w-4" />
             Pipelines
           </Button>
-          <Button variant="outline" size="sm" onClick={() => router.push("/admin/editor/login")} className="rounded-full border-brand-dark-yellow/20 text-brand-dark-yellow hover:bg-brand-yellow/10 gap-2">
+          <Button variant="outline" size="sm" onClick={() => router.push("/admin/editor/login")} className="border-brand-dark-yellow/20 text-brand-dark-yellow hover:bg-brand-yellow/10 gap-2">
             <Settings className="h-4 w-4" />
             Survey Editor
           </Button>
-          <Button variant="outline" size="sm" onClick={handleLogout} className="rounded-full border-brand-blue/15 text-brand-blue/60 hover:bg-brand-blue/5 gap-2">
+          <Button variant="outline" size="sm" onClick={handleLogout} className="border-brand-blue/15 text-brand-blue/60 hover:bg-brand-blue/5 gap-2">
             <LogOut className="h-4 w-4" />
             Sign Out
           </Button>
@@ -483,17 +490,20 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" onClick={() => handleExport("raw.csv")} className="gap-2 rounded-full border-brand-blue/15 text-brand-blue/70">
+              <Button variant="outline" size="sm" onClick={() => handleExport("raw.csv")} className="gap-2 border-brand-blue/15 text-brand-blue/70">
                 <FileSpreadsheet className="h-4 w-4" /> Raw CSV
               </Button>
-              <Button variant="outline" size="sm" onClick={() => handleExport("structured.csv")} className="gap-2 rounded-full border-brand-blue/15 text-brand-blue/70">
+              <Button variant="outline" size="sm" onClick={() => handleExport("structured.csv")} className="gap-2 border-brand-blue/15 text-brand-blue/70">
                 <FileSpreadsheet className="h-4 w-4" /> Structured CSV
               </Button>
-              <Button variant="outline" size="sm" onClick={() => handleExport("summary.pdf")} className="gap-2 rounded-full border-brand-blue/15 text-brand-blue/70">
+              <Button variant="outline" size="sm" onClick={() => handleExport("summary.pdf")} className="gap-2 border-brand-blue/15 text-brand-blue/70">
                 <FileText className="h-4 w-4" /> Summary PDF
               </Button>
-              <Button variant="outline" size="sm" onClick={() => handleExport("summary.pptx")} className="gap-2 rounded-full border-brand-blue/15 text-brand-blue/70">
+              <Button variant="outline" size="sm" onClick={() => handleExport("summary.pptx")} className="gap-2 border-brand-blue/15 text-brand-blue/70">
                 <Presentation className="h-4 w-4" /> Summary PPTX
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => handleExport("user-testing.csv")} className="gap-2 border-brand-teal/20 text-brand-teal">
+                <FileSpreadsheet className="h-4 w-4" /> User Testing CSV
               </Button>
             </div>
           </CardContent>
@@ -510,7 +520,7 @@ export default function DashboardPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="gap-2 rounded-full border-red-300 text-red-600 hover:bg-red-50"
+                  className="gap-2 border-red-300 text-red-600 hover:bg-red-50"
                   onClick={() => setShowDeleteConfirm(true)}
                 >
                   <Trash2 className="h-4 w-4" /> Delete All
@@ -524,7 +534,6 @@ export default function DashboardPage() {
                     <TableHead>Date</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Version</TableHead>
-                    <TableHead></TableHead>
                     <TableHead>Time</TableHead>
                     <TableHead>Recommend</TableHead>
                     <TableHead>Planned Workflow</TableHead>
@@ -555,13 +564,6 @@ export default function DashboardPage() {
                             </Badge>
                           ) : (
                             <span className="text-xs text-brand-blue/20">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {item.ip_hash && ipHashCounts[item.ip_hash] > 1 && (
-                            <Badge variant="outline" className="text-[10px] border-red-300 text-red-500 bg-red-50">
-                              Dup IP
-                            </Badge>
                           )}
                         </TableCell>
                         <TableCell className="text-xs">
@@ -609,6 +611,225 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* ── Analytics Section ── */}
+        {analytics && (
+          <>
+            <div className="pt-4">
+              <h2 className="text-lg font-serif text-brand-blue mb-4">User Testing Analytics</h2>
+            </div>
+
+            {/* Funnel */}
+            <Card className="bg-white border-0 shadow-sm rounded-2xl">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium text-brand-blue flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4" /> Survey Funnel
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={[
+                      { name: "Landing", value: analytics.funnel.page_views_landing },
+                      { name: "Consent", value: analytics.funnel.page_views_consent },
+                      { name: "Started", value: analytics.funnel.survey_starts },
+                      { name: "In Progress", value: analytics.funnel.survey_in_progress },
+                      { name: "Completed", value: analytics.funnel.survey_completed },
+                    ]}>
+                      <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                      <YAxis tick={{ fontSize: 12 }} />
+                      <Tooltip />
+                      <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                        {["#124D8F", "#124D8F", "#097261", "#097261", "#097261"].map((color, i) => (
+                          <Cell key={i} fill={color} fillOpacity={0.6 + i * 0.1} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <p className="text-xs text-brand-blue/40 mt-2">
+                  Dropout rate: {(analytics.funnel.dropout_rate * 100).toFixed(1)}%
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* Per-Question Dropout + Voice vs Text */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {/* Per-Question Dropout */}
+              <Card className="bg-white border-0 shadow-sm rounded-2xl">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-brand-blue">Per-Question Dropout</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Question</TableHead>
+                        <TableHead>Reached</TableHead>
+                        <TableHead>Answered</TableHead>
+                        <TableHead>Dropped</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {analytics.per_question_dropout.map((q: { question_id: string; reached: number; answered: number; dropout_count: number }) => (
+                        <TableRow key={q.question_id} className={q.dropout_count > 0 ? "bg-red-50/50" : ""}>
+                          <TableCell className="text-xs font-mono">{q.question_id}</TableCell>
+                          <TableCell className="text-xs">{q.reached}</TableCell>
+                          <TableCell className="text-xs">{q.answered}</TableCell>
+                          <TableCell className="text-xs text-brand-red">{q.dropout_count}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+
+              {/* Voice vs Text */}
+              <Card className="bg-white border-0 shadow-sm rounded-2xl">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-brand-blue">Voice vs Text Usage</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-4">
+                      <div className="flex-1 text-center p-3 bg-brand-blue/5 rounded-xl">
+                        <p className="text-2xl font-bold text-brand-blue">{(analytics.voice_vs_text.voice_percentage * 100).toFixed(0)}%</p>
+                        <p className="text-xs text-brand-blue/40">Voice</p>
+                      </div>
+                      <div className="flex-1 text-center p-3 bg-brand-yellow/10 rounded-xl">
+                        <p className="text-2xl font-bold text-brand-dark-yellow">{((1 - analytics.voice_vs_text.voice_percentage) * 100).toFixed(0)}%</p>
+                        <p className="text-xs text-brand-blue/40">Text</p>
+                      </div>
+                    </div>
+                    <div className="h-48">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={analytics.voice_vs_text.per_question.map((q: { question_id: string; voice: number; text: number }) => ({
+                          name: q.question_id.replace("q", "Q").replace("_", " "),
+                          Voice: q.voice,
+                          Text: q.text,
+                        }))}>
+                          <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                          <YAxis tick={{ fontSize: 10 }} />
+                          <Tooltip />
+                          <Bar dataKey="Voice" fill="#124D8F" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="Text" fill="#FDCE3E" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Follow-up Effectiveness + Voice vs Text Quality + Review Edits + Experience Rating */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Follow-up Effectiveness */}
+              <Card className="bg-white border-0 shadow-sm rounded-2xl">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-brand-blue">Follow-up Effectiveness</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-brand-blue/50">Vague detected</span>
+                    <span className="font-semibold">{analytics.followup_effectiveness.total_vague_detected}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-brand-blue/50">Follow-ups shown</span>
+                    <span className="font-semibold">{analytics.followup_effectiveness.followups_shown}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-brand-blue/50">Answered</span>
+                    <span className="font-semibold text-brand-teal">{analytics.followup_effectiveness.followups_answered}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-brand-blue/50">Skipped</span>
+                    <span className="font-semibold text-brand-red">{analytics.followup_effectiveness.followups_skipped}</span>
+                  </div>
+                  <div className="pt-1 border-t">
+                    <p className="text-xs text-brand-blue/40">Answer rate: <span className="font-semibold text-brand-blue">{(analytics.followup_effectiveness.answer_rate * 100).toFixed(0)}%</span></p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Voice vs Text Quality */}
+              <Card className="bg-white border-0 shadow-sm rounded-2xl">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-brand-blue">Voice vs Text Quality</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-brand-blue/50">Voice vague rate</span>
+                    <span className="font-semibold">{(analytics.voice_vs_text_quality.voice_vague_rate * 100).toFixed(0)}%</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-brand-blue/50">Text vague rate</span>
+                    <span className="font-semibold">{(analytics.voice_vs_text_quality.text_vague_rate * 100).toFixed(0)}%</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-brand-blue/50">Voice avg length</span>
+                    <span className="font-semibold">{analytics.voice_vs_text_quality.voice_avg_length} chars</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-brand-blue/50">Text avg length</span>
+                    <span className="font-semibold">{analytics.voice_vs_text_quality.text_avg_length} chars</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Review Edits */}
+              <Card className="bg-white border-0 shadow-sm rounded-2xl">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-brand-blue">Review Page Edits</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <p className="text-2xl font-bold text-brand-blue">{(analytics.review_edits.edit_rate * 100).toFixed(0)}%</p>
+                  <p className="text-xs text-brand-blue/40">of reviewers edited responses</p>
+                  <div className="flex justify-between text-xs pt-1">
+                    <span className="text-brand-blue/50">Total reviews</span>
+                    <span className="font-semibold">{analytics.review_edits.total_reviews}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-brand-blue/50">With edits</span>
+                    <span className="font-semibold">{analytics.review_edits.reviews_with_edits}</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Experience Rating */}
+              <Card className="bg-white border-0 shadow-sm rounded-2xl">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-brand-blue">Experience Rating</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <p className="text-2xl font-bold text-brand-blue">
+                    {analytics.experience_rating.avg_rating?.toFixed(1) || "N/A"}<span className="text-sm font-normal text-brand-blue/40">/5</span>
+                  </p>
+                  <div className="flex gap-1">
+                    {["1", "2", "3", "4", "5"].map((k) => (
+                      <div key={k} className="flex-1">
+                        <div className="bg-brand-blue/10 rounded-sm overflow-hidden" style={{ height: 40 }}>
+                          <div
+                            className="bg-brand-blue rounded-sm w-full"
+                            style={{
+                              height: analytics.experience_rating.total_ratings > 0
+                                ? `${(analytics.experience_rating.distribution[k] / analytics.experience_rating.total_ratings) * 100}%`
+                                : "0%",
+                              marginTop: "auto",
+                            }}
+                          />
+                        </div>
+                        <p className="text-[10px] text-center text-brand-blue/40 mt-0.5">{k}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-brand-blue/40">
+                    {analytics.experience_rating.total_ratings} ratings ({(analytics.experience_rating.response_rate * 100).toFixed(0)}% response rate)
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+          </>
+        )}
       </main>
 
       <Dialog open={showNewProgram} onOpenChange={closeNewProgramDialog}>
@@ -645,7 +866,7 @@ export default function DashboardPage() {
               <DialogFooter>
                 <Button
                   onClick={closeNewProgramDialog}
-                  className="rounded-full bg-brand-blue hover:bg-brand-blue/90"
+                  className="bg-brand-blue hover:bg-brand-blue/90"
                 >
                   Done
                 </Button>
@@ -684,14 +905,14 @@ export default function DashboardPage() {
                 <Button
                   variant="outline"
                   onClick={closeNewProgramDialog}
-                  className="rounded-full"
+                  className=""
                 >
                   Cancel
                 </Button>
                 <Button
                   onClick={handleCreateProgram}
                   disabled={creating || !newProgramName.trim() || !newCourseName.trim()}
-                  className="rounded-full bg-brand-blue hover:bg-brand-blue/90 gap-2"
+                  className="bg-brand-blue hover:bg-brand-blue/90 gap-2"
                 >
                   {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                   Create
@@ -720,14 +941,14 @@ export default function DashboardPage() {
             <Button
               variant="outline"
               onClick={() => setShowDeleteConfirm(false)}
-              className="rounded-full"
+              className=""
             >
               Cancel
             </Button>
             <Button
               onClick={handleDeleteAllResponses}
               disabled={deleting}
-              className="rounded-full bg-red-600 hover:bg-red-700 text-white gap-2"
+              className="bg-red-600 hover:bg-red-700 text-white gap-2"
             >
               {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
               Delete All

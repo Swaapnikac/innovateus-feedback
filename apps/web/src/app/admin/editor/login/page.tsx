@@ -72,7 +72,7 @@ export default function EditorLoginPage() {
                 <Button
                   type="submit"
                   disabled={loading || !password}
-                  className="w-full h-11 bg-brand-blue hover:bg-brand-blue/90 rounded-full gap-2"
+                  className="w-full bg-brand-blue hover:bg-brand-blue/90 gap-2"
                 >
                   {loading ? (
                     <Loader2 className="h-4 w-4 animate-spin" />

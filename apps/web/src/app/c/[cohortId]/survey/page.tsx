@@ -13,6 +13,7 @@ import { OpenEndedQuestion } from "@/components/OpenEndedQuestion";
 import { FollowUpPanel } from "@/components/FollowUpPanel";
 import { PrivacyFooter } from "@/components/PrivacyFooter";
 import { api, type SurveyQuestion } from "@/lib/api";
+import { initSession, trackPageView, trackEvent, trackDropout, setContext } from "@/lib/analytics";
 
 interface AnswerState {
   value: string;
@@ -23,6 +24,7 @@ interface AnswerState {
   followups?: string[];
   followupAnswers?: { followup_1_answer?: string; followup_2_answer?: string };
   missingInfoTypes?: string[];
+  voiceConfirmed?: boolean;
 }
 
 export default function SurveyPage() {
@@ -38,6 +40,7 @@ export default function SurveyPage() {
   const [showFollowups, setShowFollowups] = useState(false);
   const [checkingVagueness, setCheckingVagueness] = useState(false);
   const [completing, setCompleting] = useState(false);
+  const [editReturnMode, setEditReturnMode] = useState(false);
 
   const submissionId = typeof window !== "undefined" ? sessionStorage.getItem("submission_id") : null;
 
@@ -46,10 +49,42 @@ export default function SurveyPage() {
       router.replace(`/c/${cohortId}`);
       return;
     }
+
+    const editMode = typeof window !== "undefined" ? sessionStorage.getItem("edit_mode") : null;
+    const editQuestionId = typeof window !== "undefined" ? sessionStorage.getItem("edit_question_id") : null;
+
+    if (editMode === "true" && editQuestionId) {
+      // Restore answers from sessionStorage
+      const savedAnswers = sessionStorage.getItem("review_answers");
+      if (savedAnswers) {
+        try { setAnswers(JSON.parse(savedAnswers)); } catch {}
+      }
+
+      sessionStorage.removeItem("edit_mode");
+      sessionStorage.removeItem("edit_question_id");
+
+      api.getSurvey(cohortId).then((data) => {
+        setQuestions(data.survey.questions);
+        const visibleQs = data.survey.questions.filter((q: SurveyQuestion) => {
+          if (!q.condition) return true;
+          return true; // Show all in edit mode — condition checked after answers loaded
+        });
+        const qIndex = visibleQs.findIndex((q: SurveyQuestion) => q.id === editQuestionId);
+        if (qIndex >= 0) setCurrentStep(qIndex);
+        setEditReturnMode(true);
+        setLoading(false);
+      });
+      return;
+    }
+
     api.getSurvey(cohortId).then((data) => {
       setQuestions(data.survey.questions);
       setLoading(false);
     });
+
+    initSession();
+    setContext(cohortId, submissionId || undefined);
+    trackPageView("survey", cohortId);
   }, [cohortId, submissionId, router]);
 
   const visibleQuestions = questions.filter((q) => {
@@ -64,6 +99,27 @@ export default function SurveyPage() {
 
   const currentQuestion = visibleQuestions[currentStep];
   const currentAnswer = currentQuestion ? answers[currentQuestion.id] : undefined;
+
+  // Track question views and register dropout handler
+  useEffect(() => {
+    if (!currentQuestion) return;
+    trackEvent("question_view", {
+      question_id: currentQuestion.id,
+      question_index: currentStep,
+      question_type: currentQuestion.type,
+    }, cohortId);
+
+    const handleBeforeUnload = () => {
+      const answeredCount = Object.keys(answers).filter((k) => {
+        const a = answers[k];
+        return a.value.trim().length > 0 || a.multiValues.length > 0;
+      }).length;
+      trackDropout(cohortId, submissionId, currentQuestion.id, answeredCount);
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep, currentQuestion?.id]);
 
   const defaultAnswer: AnswerState = { value: "", multiValues: [], inputMode: "voice" };
 
@@ -101,6 +157,12 @@ export default function SurveyPage() {
         followup_2: ans.followups?.[1],
         followup_2_answer: ans.followupAnswers?.followup_2_answer,
       });
+      trackEvent("question_answer", {
+        question_id: currentQuestion.id,
+        question_type: currentQuestion.type,
+        input_mode: currentQuestion.type === "open" ? ans.inputMode : "none",
+        has_answer: !!rawValue,
+      }, cohortId);
     } catch {
       // Silently fail — answer will be retried on next navigation
     } finally {
@@ -111,21 +173,30 @@ export default function SurveyPage() {
   const advanceToNext = useCallback(async (overrides?: Partial<AnswerState>) => {
     await saveCurrentAnswer(overrides);
 
+    // Edit-return mode: go back to review page after saving
+    if (editReturnMode) {
+      const updatedAnswers = { ...answers };
+      if (currentQuestion && overrides) {
+        updatedAnswers[currentQuestion.id] = { ...(updatedAnswers[currentQuestion.id] || defaultAnswer), ...overrides };
+      }
+      sessionStorage.setItem("review_answers", JSON.stringify(updatedAnswers));
+      setEditReturnMode(false);
+      router.push(`/c/${cohortId}/review`);
+      return;
+    }
+
     if (currentStep < visibleQuestions.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
-      setCompleting(true);
-      try {
-        const result = await api.completeSubmission(submissionId!);
-        sessionStorage.setItem("extraction", JSON.stringify(result.extraction));
-        router.push(`/c/${cohortId}/done`);
-      } catch {
-        alert("Failed to complete survey. Please try again.");
-      } finally {
-        setCompleting(false);
+      // Last question: save answers and go to review page
+      const allAnswers = { ...answers };
+      if (currentQuestion && overrides) {
+        allAnswers[currentQuestion.id] = { ...(allAnswers[currentQuestion.id] || defaultAnswer), ...overrides };
       }
+      sessionStorage.setItem("review_answers", JSON.stringify(allAnswers));
+      router.push(`/c/${cohortId}/review`);
     }
-  }, [saveCurrentAnswer, currentStep, visibleQuestions.length, submissionId, cohortId, router]);
+  }, [saveCurrentAnswer, currentStep, visibleQuestions.length, submissionId, cohortId, router, editReturnMode, answers, currentQuestion, defaultAnswer]);
 
   const handleNext = async () => {
     if (!currentQuestion) return;
@@ -157,6 +228,10 @@ export default function SurveyPage() {
               followups: followupResult.followups,
             });
             setShowFollowups(true);
+            trackEvent("followup_triggered", {
+              question_id: currentQuestion.id,
+              num_followups: followupResult.followups.length,
+            }, cohortId);
             setCheckingVagueness(false);
             return;
           }
@@ -182,6 +257,11 @@ export default function SurveyPage() {
   }) => {
     if (currentQuestion) {
       updateAnswer(currentQuestion.id, { followupAnswers });
+      trackEvent("followup_answered", {
+        question_id: currentQuestion.id,
+        followup_1_answered: !!followupAnswers.followup_1_answer,
+        followup_2_answered: !!followupAnswers.followup_2_answer,
+      }, cohortId);
     }
     setShowFollowups(false);
     await advanceToNext({ followupAnswers });
@@ -197,6 +277,20 @@ export default function SurveyPage() {
   const isCurrentValid = () => {
     if (!currentQuestion) return false;
     const ans = getAnswer(currentQuestion.id);
+
+    // For voice-eligible open questions in voice mode:
+    // Only block Next when voiceConfirmed is explicitly false (user started recording
+    // but hasn't clicked "Use This Response" yet). When voiceConfirmed is undefined
+    // (user hasn't interacted), allow Next since questions aren't mandatory.
+    if (
+      currentQuestion.type === "open" &&
+      currentQuestion.voice_eligible &&
+      ans.inputMode === "voice" &&
+      ans.voiceConfirmed === false
+    ) {
+      return false;
+    }
+
     if (!currentQuestion.required) return true;
     if (currentQuestion.type === "multi") return ans.multiValues.length > 0;
     return ans.value.trim().length > 0;
@@ -213,11 +307,11 @@ export default function SurveyPage() {
   return (
     <div className="min-h-screen bg-brand-light-blue/40 pb-16">
       <header className="bg-white/80 backdrop-blur-md border-b border-[#E4EFFC] px-6 py-3 mb-6">
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-3xl mx-auto">
           <InnovateLogo size="sm" />
         </div>
       </header>
-      <div className="max-w-2xl mx-auto px-4 space-y-6">
+      <div className="max-w-3xl mx-auto px-4 space-y-6">
         <ProgressBar current={currentStep + 1} total={visibleQuestions.length} />
 
         {currentQuestion && (
@@ -252,10 +346,13 @@ export default function SurveyPage() {
                     onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
                     voiceEligible={currentQuestion.voice_eligible}
                     onInputModeChange={(mode) =>
-                      updateAnswer(currentQuestion.id, { inputMode: mode })
+                      updateAnswer(currentQuestion.id, { inputMode: mode, voiceConfirmed: mode === "text" ? undefined : false })
                     }
                     onTranscriptReady={(transcript) =>
-                      updateAnswer(currentQuestion.id, { transcript, value: transcript })
+                      updateAnswer(currentQuestion.id, { transcript, value: transcript, voiceConfirmed: true })
+                    }
+                    onRecordingStarted={() =>
+                      updateAnswer(currentQuestion.id, { voiceConfirmed: false })
                     }
                   />
                 )}
@@ -277,12 +374,12 @@ export default function SurveyPage() {
           </QuestionCard>
         )}
 
-        <div className="flex justify-between max-w-2xl mx-auto">
+        <div className="flex justify-between max-w-3xl mx-auto">
           <Button
             variant="outline"
             onClick={handlePrev}
-            disabled={currentStep === 0 || saving || completing}
-            className="gap-2 rounded-full border-brand-blue/15 text-brand-blue/70 hover:bg-brand-blue/5"
+            disabled={currentStep === 0 || saving || editReturnMode}
+            className="gap-2 border-brand-blue/15 text-brand-blue/70 hover:bg-brand-blue/5"
           >
             <ChevronLeft className="h-4 w-4" />
             Back
@@ -290,19 +387,18 @@ export default function SurveyPage() {
 
           <Button
             onClick={handleNext}
-            disabled={!isCurrentValid() || saving || checkingVagueness || completing || showFollowups}
-            className="gap-2 bg-brand-blue hover:bg-brand-blue/90 rounded-full px-6 shadow-sm"
+            disabled={!isCurrentValid() || saving || checkingVagueness || showFollowups}
+            className="gap-2 bg-brand-blue hover:bg-brand-blue/90 shadow-sm"
           >
             {checkingVagueness && <Loader2 className="h-4 w-4 animate-spin" />}
-            {completing && <Loader2 className="h-4 w-4 animate-spin" />}
-            {completing
-              ? "Finishing..."
-              : checkingVagueness
-                ? "Analyzing..."
+            {checkingVagueness
+              ? "Analyzing..."
+              : editReturnMode
+                ? "Back to Review"
                 : currentStep === visibleQuestions.length - 1
-                  ? "Submit"
+                  ? "Review"
                   : "Next"}
-            {!checkingVagueness && !completing && <ChevronRight className="h-4 w-4" />}
+            {!checkingVagueness && <ChevronRight className="h-4 w-4" />}
           </Button>
         </div>
       </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,10 +8,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { InnovateLogo } from "@/components/InnovateLogo";
 import { Shield, ArrowRight, CheckCircle2, Clock } from "lucide-react";
 import { api } from "@/lib/api";
+import { initSession, trackPageView, trackEvent, setContext } from "@/lib/analytics";
 
 const PRIVACY_ITEMS = [
   "Your responses are completely anonymous",
-  "No audio is stored — only transcript text is saved",
+  "No audio is stored. Only transcript text is saved",
   "No identifying information is collected",
   "Responses are used only to improve the program",
 ];
@@ -24,11 +25,18 @@ export default function ConsentPage() {
   const [loading, setLoading] = useState(false);
   const [alreadySubmitted, setAlreadySubmitted] = useState(false);
 
+  useEffect(() => {
+    initSession();
+    trackPageView("consent", cohortId);
+  }, [cohortId]);
+
   const handleStart = async () => {
     setLoading(true);
     try {
       const { submission_id } = await api.startSubmission(cohortId);
       sessionStorage.setItem("submission_id", submission_id);
+      setContext(cohortId, submission_id);
+      trackEvent("survey_start", {}, cohortId, submission_id);
       router.push(`/c/${cohortId}/survey`);
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
@@ -51,7 +59,7 @@ export default function ConsentPage() {
         </div>
       </header>
 
-      <div className="max-w-lg mx-auto px-4 py-10 space-y-6">
+      <div className="max-w-2xl mx-auto px-4 py-10 space-y-6">
         {alreadySubmitted ? (
           <>
             <div className="text-center space-y-3">
@@ -116,7 +124,8 @@ export default function ConsentPage() {
                 <Button
                   onClick={handleStart}
                   disabled={!agreed || loading}
-                  className="w-full h-12 text-base rounded-full bg-brand-blue hover:bg-brand-blue/90 gap-2 shadow-md hover:shadow-lg transition-all"
+                  size="lg"
+                  className="w-full text-base bg-brand-blue hover:bg-brand-blue/90 gap-2 shadow-md hover:shadow-lg transition-all"
                 >
                   {loading ? "Starting..." : "Begin Survey"}
                   <ArrowRight className="h-4 w-4" />

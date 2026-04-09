@@ -62,15 +62,13 @@ def seed(endpoint_url: str | None = None):
 
         print(f"Seeded cohort: Pilot Cohort 1 ({DEFAULT_COHORT_ID})")
     else:
-        if not existing.get("survey_config"):
-            table.update_item(
-                Key={"pk": f"COHORT#{DEFAULT_COHORT_ID}", "sk": "METADATA"},
-                UpdateExpression="SET survey_config = :config",
-                ExpressionAttributeValues={":config": default_survey},
-            )
-            print(f"Populated survey_config for: {existing.get('name')}")
-        else:
-            print(f"Cohort already exists: {existing.get('name')}")
+        # Always refresh survey_config to latest default
+        table.update_item(
+            Key={"pk": f"COHORT#{DEFAULT_COHORT_ID}", "sk": "METADATA"},
+            UpdateExpression="SET survey_config = :config",
+            ExpressionAttributeValues={":config": default_survey},
+        )
+        print(f"Updated survey_config for: {existing.get('name')}")
 
 
 if __name__ == "__main__":

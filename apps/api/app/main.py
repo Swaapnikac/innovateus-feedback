@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 from app.config import get_settings
-from app.routers import survey, submissions, transcribe, ai, admin, editor, jotform
+from app.routers import survey, submissions, transcribe, ai, admin, editor, jotform, events
 
 settings = get_settings()
 
@@ -25,6 +25,7 @@ app.include_router(ai.router, prefix="/v1", tags=["ai"])
 app.include_router(admin.router, prefix="/v1/admin", tags=["admin"])
 app.include_router(editor.router, prefix="/v1/admin", tags=["editor"])
 app.include_router(jotform.router, prefix="/v1/admin", tags=["jotform"])
+app.include_router(events.router, prefix="/v1", tags=["events"])
 
 
 @app.get("/")

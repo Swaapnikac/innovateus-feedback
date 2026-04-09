@@ -159,7 +159,7 @@ export default function PipelinesPage() {
           variant="outline"
           size="sm"
           onClick={() => router.push("/admin/dashboard")}
-          className="rounded-full border-brand-blue/15 text-brand-blue/60 hover:bg-brand-blue/5 gap-2"
+          className="border-brand-blue/15 text-brand-blue/60 hover:bg-brand-blue/5 gap-2"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Dashboard
@@ -371,7 +371,7 @@ export default function PipelinesPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="rounded-full gap-2 border-brand-blue/20 text-brand-blue hover:bg-brand-blue/5"
+                      className="gap-2 border-brand-blue/20 text-brand-blue hover:bg-brand-blue/5"
                       onClick={() => handleSyncAll(false)}
                       disabled={syncing.qualtrics}
                     >
@@ -385,7 +385,7 @@ export default function PipelinesPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="rounded-full gap-2 border-brand-dark-yellow/30 text-brand-dark-yellow hover:bg-brand-yellow/10"
+                      className="gap-2 border-brand-dark-yellow/30 text-brand-dark-yellow hover:bg-brand-yellow/10"
                       onClick={() => handleSyncAll(true)}
                       disabled={syncing.qualtrics}
                     >

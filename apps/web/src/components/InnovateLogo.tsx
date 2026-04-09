@@ -9,8 +9,8 @@ interface InnovateLogoProps {
 }
 
 export function InnovateLogo({ className = "", size = "md", variant = "color" }: InnovateLogoProps) {
-  const heights = { sm: 24, md: 32, lg: 44 };
-  const widths = { sm: 120, md: 160, lg: 220 };
+  const heights = { sm: 36, md: 44, lg: 56 };
+  const widths = { sm: 180, md: 220, lg: 280 };
   const h = heights[size];
   const w = widths[size];
 

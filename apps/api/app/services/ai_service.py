@@ -33,7 +33,7 @@ async def detect_vagueness(question_text: str, answer_text: str) -> dict:
         system_prompt = _load_prompt("vagueness")
 
         response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=get_settings().openai_model_vagueness,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -72,7 +72,7 @@ async def generate_followups(
         system_prompt = _load_prompt("followup")
 
         response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=get_settings().openai_model_followups,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -96,6 +96,34 @@ async def generate_followups(
         return []
 
 
+async def cleanup_transcript(raw_text: str) -> dict:
+    if not _has_api_key():
+        return {"cleaned": raw_text, "changed": False}
+
+    try:
+        client = _get_client()
+        system_prompt = _load_prompt("cleanup")
+
+        response = await client.chat.completions.create(
+            model=get_settings().openai_model_cleanup,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": raw_text},
+            ],
+            temperature=0.1,
+        )
+
+        result = json.loads(response.choices[0].message.content)
+        return {
+            "cleaned": result.get("cleaned", raw_text),
+            "changed": result.get("changed", False),
+        }
+    except Exception as e:
+        logger.warning(f"Transcript cleanup failed: {e}")
+        return {"cleaned": raw_text, "changed": False}
+
+
 async def extract_structured(answers: list[dict]) -> dict:
     empty_result = {
         "what_was_tried": None,
@@ -116,7 +144,7 @@ async def extract_structured(answers: list[dict]) -> dict:
         system_prompt = _load_prompt("extraction")
 
         response = await client.chat.completions.create(
-            model="gpt-4o",
+            model=get_settings().openai_model_extraction,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": system_prompt},

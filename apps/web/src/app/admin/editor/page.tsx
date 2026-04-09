@@ -543,7 +543,7 @@ export default function EditorPage() {
           variant="outline"
           size="sm"
           onClick={() => router.push("/admin/dashboard")}
-          className="rounded-full border-brand-blue/15 text-brand-blue/60 hover:bg-brand-blue/5 gap-2"
+          className="border-brand-blue/15 text-brand-blue/60 hover:bg-brand-blue/5 gap-2"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Dashboard
@@ -640,7 +640,7 @@ export default function EditorPage() {
                     { id: `group_${Date.now()}`, label: "", randomize: false },
                   ])
                 }
-                className="gap-1 text-xs rounded-full"
+                className="gap-1 text-xs"
               >
                 <Plus className="h-3 w-3" /> Add Group
               </Button>
@@ -724,7 +724,7 @@ export default function EditorPage() {
           <Button
             size="sm"
             onClick={addQuestion}
-            className="gap-1.5 bg-brand-blue hover:bg-brand-blue/90 rounded-full text-xs px-4"
+            className="gap-1.5 bg-brand-blue hover:bg-brand-blue/90 text-xs px-4"
           >
             <Plus className="h-3.5 w-3.5" /> Add Question
           </Button>
@@ -761,7 +761,7 @@ export default function EditorPage() {
           <Button
             onClick={handleSave}
             disabled={saving || !selectedCohort}
-            className="gap-2 bg-brand-teal hover:bg-brand-teal/90 rounded-full px-8 shadow-sm"
+            className="gap-2 bg-brand-teal hover:bg-brand-teal/90 px-8 shadow-sm"
           >
             {saving ? (
               <Loader2 className="h-4 w-4 animate-spin" />

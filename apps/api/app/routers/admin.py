@@ -6,7 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from fastapi.responses import StreamingResponse
 from boto3.dynamodb.conditions import Key, Attr
-from app.dynamo import get_surveys_table, get_submissions_table, query_all_items, scan_all_items, decimals_to_native
+from app.dynamo import get_surveys_table, get_submissions_table, get_events_table, query_all_items, scan_all_items, decimals_to_native
 from app.schemas import (
     AdminLoginRequest,
     AdminLoginResponse,
@@ -24,6 +24,7 @@ from app.services.export_service import (
     generate_structured_csv,
     generate_summary_pdf,
     generate_summary_pptx,
+    generate_user_testing_csv,
 )
 
 router = APIRouter()
@@ -79,9 +80,13 @@ def create_cohort(req: CreateCohortRequest):
     cohort_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
 
-    default_config = None
-    if DEFAULT_SURVEY_PATH.exists():
-        default_config = json.loads(DEFAULT_SURVEY_PATH.read_text(encoding="utf-8"))
+    # Start with empty survey — admin builds from scratch in the editor
+    empty_config = {
+        "version": "1.0",
+        "title": "Untitled Survey",
+        "questions": [],
+        "question_groups": [],
+    }
 
     # Create cohort metadata
     table.put_item(Item={
@@ -90,24 +95,23 @@ def create_cohort(req: CreateCohortRequest):
         "cohort_id": cohort_id,
         "name": req.name,
         "course_name": req.course_name,
-        "survey_config": default_config,
+        "survey_config": empty_config,
         "active_version": "v1",
         "max_submissions_per_ip": 1,
         "created_at": now,
     })
 
     # Create initial version
-    if default_config:
-        table.put_item(Item={
-            "pk": f"COHORT#{cohort_id}",
-            "sk": "VERSION#v1",
-            "cohort_id": cohort_id,
-            "version_label": "v1",
-            "config": default_config,
-            "change_summary": "Initial survey configuration",
-            "created_by": "admin",
-            "created_at": now,
-        })
+    table.put_item(Item={
+        "pk": f"COHORT#{cohort_id}",
+        "sk": "VERSION#v1",
+        "cohort_id": cohort_id,
+        "version_label": "v1",
+        "config": empty_config,
+        "change_summary": "Empty survey created",
+        "created_by": "admin",
+        "created_at": now,
+    })
 
     return CohortResponse(
         id=uuid.UUID(cohort_id),
@@ -441,3 +445,217 @@ async def qualtrics_sync_all(
             errors.append({"submission_id": str(sub_id), "error": sync_result.get("error")})
 
     return {"total": total, "synced": synced, "failed": failed, "errors": errors}
+
+
+# ── Analytics ────────────────────────────────────────────────────────
+
+def _get_events_for_cohort(cohort_id: Optional[uuid.UUID], start: Optional[datetime] = None, end: Optional[datetime] = None) -> list[dict]:
+    """Fetch events for a cohort using the CohortEventIndex GSI."""
+    events_table = get_events_table()
+    if cohort_id:
+        items = query_all_items(
+            events_table,
+            IndexName="CohortEventIndex",
+            KeyConditionExpression=Key("gsi1_pk").eq(f"COHORT#{cohort_id}"),
+        )
+    else:
+        items = scan_all_items(events_table)
+
+    if start:
+        items = [e for e in items if e.get("timestamp", "") >= start.isoformat()]
+    if end:
+        items = [e for e in items if e.get("timestamp", "") <= end.isoformat()]
+    return [decimals_to_native(e) for e in items]
+
+
+@router.get("/analytics", dependencies=[Depends(require_admin)])
+def get_analytics(
+    cohort_id: Optional[uuid.UUID] = None,
+    start: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+):
+    events = _get_events_for_cohort(cohort_id, start, end)
+    submissions = _get_submissions_for_filters(cohort_id, start, end)
+
+    # Group events by type
+    by_type: dict[str, list[dict]] = {}
+    for evt in events:
+        t = evt.get("event_type", "")
+        by_type.setdefault(t, []).append(evt)
+
+    # Deduplicate page views by session
+    def count_unique_page_views(page: str) -> int:
+        sessions = set()
+        for evt in by_type.get("page_view", []):
+            if evt.get("event_data", {}).get("page") == page:
+                sessions.add(evt.get("session_token", ""))
+        return len(sessions)
+
+    # ── Funnel ──
+    funnel = {
+        "page_views_landing": count_unique_page_views("landing"),
+        "page_views_consent": count_unique_page_views("consent"),
+        "survey_starts": len(by_type.get("survey_start", [])),
+        "survey_in_progress": len([s for s in submissions if len(s.get("answers", [])) > 0]),
+        "survey_completed": len([s for s in submissions if s.get("status") == "completed"]),
+    }
+    funnel["dropout_rate"] = round(
+        1 - (funnel["survey_completed"] / funnel["survey_starts"]) if funnel["survey_starts"] > 0 else 0, 3
+    )
+
+    # ── Per-question dropout ──
+    question_reached: dict[str, int] = {}
+    question_answered: dict[str, int] = {}
+    for evt in by_type.get("question_view", []):
+        qid = evt.get("event_data", {}).get("question_id", "")
+        question_reached[qid] = question_reached.get(qid, 0) + 1
+    for evt in by_type.get("question_answer", []):
+        qid = evt.get("event_data", {}).get("question_id", "")
+        question_answered[qid] = question_answered.get(qid, 0) + 1
+
+    all_qids = sorted(set(list(question_reached.keys()) + list(question_answered.keys())))
+    per_question_dropout = []
+    for qid in all_qids:
+        reached = question_reached.get(qid, 0)
+        answered = question_answered.get(qid, 0)
+        per_question_dropout.append({
+            "question_id": qid,
+            "reached": reached,
+            "answered": answered,
+            "dropout_count": max(0, reached - answered),
+        })
+
+    # ── Voice vs Text ──
+    voice_count = 0
+    text_count = 0
+    voice_per_q: dict[str, int] = {}
+    text_per_q: dict[str, int] = {}
+    for sub in submissions:
+        for a in sub.get("answers", []):
+            if a.get("question_type") != "open":
+                continue
+            qid = a.get("question_id", "")
+            if a.get("input_mode") == "voice":
+                voice_count += 1
+                voice_per_q[qid] = voice_per_q.get(qid, 0) + 1
+            else:
+                text_count += 1
+                text_per_q[qid] = text_per_q.get(qid, 0) + 1
+
+    total_open = voice_count + text_count
+    voice_vs_text = {
+        "total_open_answers": total_open,
+        "voice_count": voice_count,
+        "text_count": text_count,
+        "voice_percentage": round(voice_count / total_open, 3) if total_open > 0 else 0,
+        "per_question": [
+            {"question_id": qid, "voice": voice_per_q.get(qid, 0), "text": text_per_q.get(qid, 0)}
+            for qid in sorted(set(list(voice_per_q.keys()) + list(text_per_q.keys())))
+        ],
+    }
+
+    # ── Follow-up effectiveness ──
+    followup_triggered = len(by_type.get("followup_triggered", []))
+    followup_answered_evts = by_type.get("followup_answered", [])
+    followup_answered_count = len([e for e in followup_answered_evts if e.get("event_data", {}).get("followup_1_answered")])
+    followup_skipped = len(followup_answered_evts) - followup_answered_count
+
+    # Vague rate from submission data
+    open_answers = []
+    for sub in submissions:
+        for a in sub.get("answers", []):
+            if a.get("question_type") == "open":
+                open_answers.append(a)
+    vague_count = sum(1 for a in open_answers if a.get("is_vague") is True)
+    vague_with_followup = sum(1 for a in open_answers if a.get("is_vague") and a.get("followup_1_answer"))
+
+    followup_effectiveness = {
+        "total_vague_detected": vague_count,
+        "followups_shown": followup_triggered,
+        "followups_answered": followup_answered_count,
+        "followups_skipped": followup_skipped,
+        "answer_rate": round(followup_answered_count / followup_triggered, 3) if followup_triggered > 0 else 0,
+    }
+
+    # ── Voice vs Text quality ──
+    voice_vague = sum(1 for a in open_answers if a.get("input_mode") == "voice" and a.get("is_vague"))
+    voice_total = sum(1 for a in open_answers if a.get("input_mode") == "voice")
+    text_vague = sum(1 for a in open_answers if a.get("input_mode") != "voice" and a.get("is_vague"))
+    text_total = sum(1 for a in open_answers if a.get("input_mode") != "voice")
+
+    voice_lengths = [len(a.get("answer_raw", "")) for a in open_answers if a.get("input_mode") == "voice" and a.get("answer_raw")]
+    text_lengths = [len(a.get("answer_raw", "")) for a in open_answers if a.get("input_mode") != "voice" and a.get("answer_raw")]
+
+    voice_vs_text_quality = {
+        "voice_vague_rate": round(voice_vague / voice_total, 3) if voice_total > 0 else 0,
+        "text_vague_rate": round(text_vague / text_total, 3) if text_total > 0 else 0,
+        "voice_avg_length": round(sum(voice_lengths) / len(voice_lengths), 1) if voice_lengths else 0,
+        "text_avg_length": round(sum(text_lengths) / len(text_lengths), 1) if text_lengths else 0,
+    }
+
+    # ── Review edits ──
+    review_edit_evts = by_type.get("review_edit", [])
+    review_sessions_with_edits = len(set(e.get("session_token", "") for e in review_edit_evts))
+    total_reviews = count_unique_page_views("review")
+    edits_per_q: dict[str, int] = {}
+    for evt in review_edit_evts:
+        qid = evt.get("event_data", {}).get("question_id", "")
+        edits_per_q[qid] = edits_per_q.get(qid, 0) + 1
+
+    review_edits = {
+        "total_reviews": total_reviews,
+        "reviews_with_edits": review_sessions_with_edits,
+        "edit_rate": round(review_sessions_with_edits / total_reviews, 3) if total_reviews > 0 else 0,
+        "edits_per_question": [{"question_id": qid, "edit_count": c} for qid, c in sorted(edits_per_q.items(), key=lambda x: x[1], reverse=True)],
+    }
+
+    # ── Experience rating ──
+    completed_subs = [s for s in submissions if s.get("status") == "completed"]
+    ratings = [int(s["experience_rating"]) for s in completed_subs if s.get("experience_rating") is not None]
+    rating_dist = {str(i): 0 for i in range(1, 6)}
+    for r in ratings:
+        rating_dist[str(r)] = rating_dist.get(str(r), 0) + 1
+
+    experience_rating = {
+        "total_ratings": len(ratings),
+        "avg_rating": round(sum(ratings) / len(ratings), 2) if ratings else None,
+        "distribution": rating_dist,
+        "response_rate": round(len(ratings) / len(completed_subs), 3) if completed_subs else 0,
+    }
+
+    # ── Time metrics ──
+    times = [int(s["time_to_complete_sec"]) for s in completed_subs if s.get("time_to_complete_sec")]
+    q_answer_events = by_type.get("question_answer", [])
+
+    time_metrics = {
+        "avg_total_sec": round(sum(times) / len(times), 1) if times else None,
+        "median_total_sec": round(sorted(times)[len(times) // 2], 1) if times else None,
+        "total_question_answers": len(q_answer_events),
+    }
+
+    return {
+        "funnel": funnel,
+        "per_question_dropout": per_question_dropout,
+        "voice_vs_text": voice_vs_text,
+        "followup_effectiveness": followup_effectiveness,
+        "voice_vs_text_quality": voice_vs_text_quality,
+        "review_edits": review_edits,
+        "experience_rating": experience_rating,
+        "time_metrics": time_metrics,
+    }
+
+
+@router.get("/export/user-testing.csv", dependencies=[Depends(require_admin)])
+def export_user_testing_csv(
+    cohort_id: Optional[uuid.UUID] = None,
+    start: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+):
+    submissions = _get_submissions_for_filters(cohort_id, start, end)
+    events = _get_events_for_cohort(cohort_id, start, end)
+    csv_data = generate_user_testing_csv(submissions, events, cohort_id)
+    return StreamingResponse(
+        iter([csv_data]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=user_testing_export.csv"},
+    )

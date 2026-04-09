@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     dynamodb_endpoint_url: str = ""  # Set to "http://localhost:8000" for DynamoDB Local
     surveys_table_name: str = "innovateus-surveys"
     submissions_table_name: str = "innovateus-submissions"
+    events_table_name: str = "innovateus-events"
     # OpenAI
     openai_api_key: str = ""
     # Auth
@@ -21,6 +22,12 @@ class Settings(BaseSettings):
     jotform_api_key: str = ""
     jotform_form_id: str = ""
     jotform_api_url: str = "https://api.jotform.com"
+    # OpenAI Models (override via env vars for latest models)
+    openai_model_vagueness: str = "gpt-4.1-nano"
+    openai_model_followups: str = "gpt-4.1-mini"
+    openai_model_extraction: str = "gpt-4.1"
+    openai_model_cleanup: str = "gpt-4.1-nano"
+    openai_model_transcription: str = "whisper-1"
     # App
     cors_origins: str = "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003"
     environment: str = "development"

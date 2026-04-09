@@ -34,6 +34,7 @@ def decimals_to_native(obj):
 _dynamodb_resource = None
 _surveys_table = None
 _submissions_table = None
+_events_table = None
 
 
 def _get_dynamodb():
@@ -61,6 +62,14 @@ def get_submissions_table():
         settings = get_settings()
         _submissions_table = _get_dynamodb().Table(settings.submissions_table_name)
     return _submissions_table
+
+
+def get_events_table():
+    global _events_table
+    if _events_table is None:
+        settings = get_settings()
+        _events_table = _get_dynamodb().Table(settings.events_table_name)
+    return _events_table
 
 
 def query_all_items(table, **kwargs):

@@ -9,6 +9,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-libre-franklin);
   --font-serif: var(--font-dm-serif-display);
+  --font-serif-text: var(--font-dm-serif-text);
   --font-mono: var(--font-geist-mono);
   --color-brand-blue: #124D8F;
   --color-brand-light-blue: #E4EFFC;
@@ -93,10 +94,19 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    font-size: 18px;
+  }
   body {
     @apply bg-background text-foreground font-sans;
   }
   h1, h2, h3 {
     font-family: var(--font-dm-serif-display);
+  }
+  h4, h5, h6 {
+    font-family: var(--font-dm-serif-text);
+  }
+  .font-serif-text {
+    font-family: var(--font-dm-serif-text);
   }
 }

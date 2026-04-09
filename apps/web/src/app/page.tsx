@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { InnovateLogo } from "@/components/InnovateLogo";
+import { AnalyticsPageView } from "@/components/AnalyticsPageView";
 import {
   ArrowRight,
   Mic,
   Shield,
-  FileText,
   MessageSquare,
   CheckCircle2,
   Clock,
@@ -15,6 +15,7 @@ import {
 export default function HomePage() {
   return (
     <div className="min-h-screen bg-white">
+      <AnalyticsPageView page="landing" />
       {/* ───── Navbar ───── */}
       <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-[#E4EFFC]">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
@@ -22,7 +23,7 @@ export default function HomePage() {
           <Link href="/c/00000000-0000-0000-0000-000000000001">
             <Button
               size="sm"
-              className="rounded-full bg-[#124D8F] hover:bg-[#124D8F]/90 text-white"
+              className="bg-[#124D8F] hover:bg-[#124D8F]/90 text-white"
             >
               Take Survey
             </Button>
@@ -33,39 +34,33 @@ export default function HomePage() {
       {/* ───── Hero ───── */}
       <section className="relative overflow-hidden bg-gradient-to-br from-[#E4EFFC] via-[#E4EFFC]/60 to-white">
         <div className="absolute top-0 right-0 w-1/2 h-full bg-[radial-gradient(ellipse_at_70%_30%,rgba(18,77,143,0.07)_0%,transparent_70%)]" />
-        <div className="max-w-6xl mx-auto px-6 py-24 md:py-32 relative">
-          <div className="max-w-2xl space-y-8">
-            <div className="inline-flex items-center gap-2 bg-white rounded-full px-4 py-2 shadow-sm border border-[#124D8F]/5">
-              <span className="w-2 h-2 rounded-full bg-[#097261] animate-pulse" />
-              <span className="text-xs font-semibold text-[#124D8F]/60 uppercase tracking-wider">
-                Post-Course Feedback Tool
-              </span>
-            </div>
-
+        <div className="max-w-6xl mx-auto px-6 py-24 md:py-32 relative flex justify-center">
+          <div className="max-w-3xl text-center space-y-8">
             <h1 className="text-4xl md:text-[3.25rem] font-serif text-[#124D8F] leading-[1.15] tracking-tight">
-              Share your voice,{" "}
               <span className="relative">
-                shape the future
+                Share your voice
                 <svg className="absolute -bottom-1 left-0 w-full" viewBox="0 0 200 8" fill="none">
                   <path d="M1 6C50 2 150 2 199 6" stroke="#FDCE3E" strokeWidth="3" strokeLinecap="round"/>
                 </svg>
-              </span>{" "}
-              of public service learning
+              </span>
+              ,{" "}shape the future of public service learning
             </h1>
 
-            <p className="text-lg text-[#124D8F]/60 leading-relaxed max-w-xl">
-              A privacy-first feedback tool that makes it easy to share your course experience — 
-              speak or type, in just a few minutes.
+            <p className="text-lg text-[#124D8F]/60 leading-relaxed max-w-2xl mx-auto">
+              Talk it out or type it down, your feedback wears the crown.<br className="hidden sm:inline" />
+              Quick, anonymous, and easy. Your honest thoughts helping public service grow.
             </p>
 
-            <Link href="/c/00000000-0000-0000-0000-000000000001">
-              <Button className="h-13 px-8 text-base rounded-full bg-[#124D8F] hover:bg-[#124D8F]/90 shadow-lg shadow-[#124D8F]/20 hover:shadow-xl hover:shadow-[#124D8F]/25 transition-all gap-2 w-full sm:w-auto">
-                Start Feedback Survey
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
+            <div className="pt-2">
+              <Link href="/c/00000000-0000-0000-0000-000000000001">
+                <Button size="lg" className="text-base bg-[#124D8F] hover:bg-[#124D8F]/90 shadow-lg shadow-[#124D8F]/20 hover:shadow-xl hover:shadow-[#124D8F]/25 transition-all gap-2 w-full sm:w-auto">
+                  Start Feedback Survey
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
+            </div>
 
-            <div className="flex items-center gap-6 text-sm text-[#124D8F]/40 pt-2">
+            <div className="flex items-center justify-center gap-6 text-sm text-[#124D8F]/40 pt-2">
               <span className="flex items-center gap-1.5">
                 <Clock className="h-3.5 w-3.5" /> 2–4 min
               </span>
@@ -108,25 +103,18 @@ export default function HomePage() {
               color: "bg-[#124D8F]/8",
               iconColor: "text-[#124D8F]",
               title: "AI-Powered Insights",
-              desc: "Smart follow-up questions draw out specific details. Structured extraction surfaces themes, barriers, and success stories.",
+              desc: "Smart follow-up questions draw out specific details so your feedback makes the biggest impact.",
             },
             {
               icon: Shield,
               color: "bg-[#097261]/10",
               iconColor: "text-[#097261]",
               title: "Privacy First",
-              desc: "Completely anonymous — no login required. Audio is never stored on servers; only your edited transcript is saved.",
-            },
-            {
-              icon: FileText,
-              color: "bg-[#097261]/10",
-              iconColor: "text-[#097261]",
-              title: "Export Reports",
-              desc: "Download raw CSV, structured CSV, summary PDF, or a ready-to-present PowerPoint deck — one click.",
+              desc: "Completely anonymous, no login required. Audio is never stored on servers; only your edited transcript is saved.",
             },
           ].map(({ icon: Icon, color, iconColor, title, desc }) => (
-            <div key={title} className="group">
-              <div className="space-y-4 p-6 rounded-2xl border border-transparent hover:border-[#E4EFFC] hover:bg-[#E4EFFC]/30 transition-all">
+            <div key={title}>
+              <div className="space-y-4 p-6 rounded-2xl">
                 <div className={`w-12 h-12 rounded-xl ${color} flex items-center justify-center`}>
                   <Icon className={`h-6 w-6 ${iconColor}`} />
                 </div>
@@ -156,7 +144,7 @@ export default function HomePage() {
                 step: "1",
                 icon: MessageSquare,
                 title: "Open Your Link",
-                desc: "Click the survey link shared by your program — no account or login needed.",
+                desc: "Click the survey link shared by your program. No account or login needed.",
               },
               {
                 step: "2",
@@ -204,12 +192,13 @@ export default function HomePage() {
         <div className="max-w-6xl mx-auto px-6 py-16 flex flex-col md:flex-row items-center justify-between gap-8">
           <div className="text-white space-y-3 text-center md:text-left">
             <h2 className="text-2xl font-serif">Ready to share your feedback?</h2>
-            <p className="text-white/60 max-w-md">
-              It only takes 2–4 minutes. Your anonymous input directly shapes how we improve courses for public servants.
+            <p className="text-white/60 max-w-md italic">
+              Your voice, our compass. Your words, our map.<br className="hidden sm:inline" />
+              Speak freely and stay nameless. Just two minutes and a tap, together we close the gap.
             </p>
           </div>
           <Link href="/c/00000000-0000-0000-0000-000000000001">
-            <Button className="h-13 px-10 text-base rounded-full bg-[#FDCE3E] text-[#124D8F] hover:bg-[#FDCE3E]/90 font-semibold shadow-lg gap-2">
+            <Button size="lg" className="text-base bg-[#FDCE3E] text-[#124D8F] hover:bg-[#FDCE3E]/90 font-semibold shadow-lg gap-2">
               Take the Survey
               <ArrowRight className="h-4 w-4" />
             </Button>

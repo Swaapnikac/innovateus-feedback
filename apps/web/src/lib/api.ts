@@ -127,6 +127,18 @@ export const api = {
       { method: "POST" }
     ),
 
+  submitExperienceRating: (submissionId: string, rating: number, feedbackText?: string) =>
+    request<{ status: string; rating: number }>(`/v1/submissions/${submissionId}/experience-rating`, {
+      method: "POST",
+      body: JSON.stringify({ rating, feedback_text: feedbackText || undefined }),
+    }),
+
+  previewExtraction: (submissionId: string) =>
+    request<{ status: string; extraction: ExtractionResult | null }>(
+      `/v1/submissions/${submissionId}/preview-extraction`,
+      { method: "POST" }
+    ),
+
   transcribe: async (audioBlob: Blob): Promise<{ transcript: string }> => {
     const formData = new FormData();
     formData.append("audio", audioBlob, "recording.webm");
@@ -137,6 +149,12 @@ export const api = {
     if (!res.ok) throw new Error("Transcription failed");
     return res.json();
   },
+
+  cleanupTranscript: (rawText: string) =>
+    request<{ cleaned: string; changed: boolean }>("/v1/ai/cleanup", {
+      method: "POST",
+      body: JSON.stringify({ raw_text: rawText }),
+    }),
 
   checkVagueness: (questionText: string, answerText: string) =>
     request<VaguenessResult>("/v1/ai/vagueness", {
@@ -276,7 +294,24 @@ export const api = {
       { method: "POST" }
     ),
 
-  exportUrl: (type: "raw.csv" | "structured.csv" | "summary.pdf" | "summary.pptx", params?: {
+  getAnalytics: (params?: { cohort_id?: string; start?: string; end?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.cohort_id) query.set("cohort_id", params.cohort_id);
+    if (params?.start) query.set("start", params.start);
+    if (params?.end) query.set("end", params.end);
+    return request<{
+      funnel: { page_views_landing: number; page_views_consent: number; survey_starts: number; survey_in_progress: number; survey_completed: number; dropout_rate: number };
+      per_question_dropout: Array<{ question_id: string; reached: number; answered: number; dropout_count: number }>;
+      voice_vs_text: { total_open_answers: number; voice_count: number; text_count: number; voice_percentage: number; per_question: Array<{ question_id: string; voice: number; text: number }> };
+      followup_effectiveness: { total_vague_detected: number; followups_shown: number; followups_answered: number; followups_skipped: number; answer_rate: number };
+      voice_vs_text_quality: { voice_vague_rate: number; text_vague_rate: number; voice_avg_length: number; text_avg_length: number };
+      review_edits: { total_reviews: number; reviews_with_edits: number; edit_rate: number; edits_per_question: Array<{ question_id: string; edit_count: number }> };
+      experience_rating: { total_ratings: number; avg_rating: number | null; distribution: Record<string, number>; response_rate: number };
+      time_metrics: { avg_total_sec: number | null; median_total_sec: number | null; total_question_answers: number };
+    }>(`/v1/admin/analytics?${query}`);
+  },
+
+  exportUrl: (type: "raw.csv" | "structured.csv" | "summary.pdf" | "summary.pptx" | "user-testing.csv", params?: {
     cohort_id?: string; start?: string; end?: string;
   }) => {
     const query = new URLSearchParams();

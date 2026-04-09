@@ -83,7 +83,7 @@ export function FollowUpPanel({ followups, onComplete }: FollowUpPanelProps) {
               variant={inputMode === "text" ? "default" : "ghost"}
               size="sm"
               onClick={() => setInputMode("text")}
-              className="gap-1.5 rounded-md h-8 text-xs"
+              className="gap-1.5 !rounded-md text-xs"
             >
               <Type className="h-3.5 w-3.5" />
               Type
@@ -93,7 +93,7 @@ export function FollowUpPanel({ followups, onComplete }: FollowUpPanelProps) {
               variant={inputMode === "voice" ? "default" : "ghost"}
               size="sm"
               onClick={() => setInputMode("voice")}
-              className="gap-1.5 rounded-md h-8 text-xs"
+              className="gap-1.5 !rounded-md text-xs"
             >
               <Mic className="h-3.5 w-3.5" />
               Voice
@@ -101,14 +101,20 @@ export function FollowUpPanel({ followups, onComplete }: FollowUpPanelProps) {
           </div>
 
           {inputMode === "text" ? (
-            <Textarea
-              value={answers[currentIndex] || ""}
-              onChange={(e) =>
-                setAnswers({ ...answers, [currentIndex]: e.target.value })
-              }
-              placeholder="Type your response (optional)..."
-              className="min-h-[80px] resize-y"
-            />
+            <div className="space-y-1">
+              <Textarea
+                value={answers[currentIndex] || ""}
+                onChange={(e) =>
+                  setAnswers({ ...answers, [currentIndex]: e.target.value.slice(0, 5000) })
+                }
+                placeholder="Type your response (optional)..."
+                className="min-h-[80px] resize-y"
+                maxLength={5000}
+              />
+              <p className={`text-xs text-right ${(answers[currentIndex]?.length || 0) >= 4900 ? "text-brand-red" : "text-brand-blue/40"}`}>
+                {answers[currentIndex]?.length || 0}/5000
+              </p>
+            </div>
           ) : (
             <VoiceRecorder
               onTranscriptComplete={handleTranscriptComplete}

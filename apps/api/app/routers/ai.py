@@ -1,6 +1,10 @@
 from fastapi import APIRouter
-from app.schemas import VaguenessRequest, VaguenessResponse, FollowUpRequest, FollowUpResponse
-from app.services.ai_service import detect_vagueness, generate_followups
+from app.schemas import (
+    VaguenessRequest, VaguenessResponse,
+    FollowUpRequest, FollowUpResponse,
+    CleanupRequest, CleanupResponse,
+)
+from app.services.ai_service import detect_vagueness, generate_followups, cleanup_transcript
 
 router = APIRouter()
 
@@ -17,3 +21,9 @@ async def get_followups(req: FollowUpRequest):
         req.question_text, req.answer_text, req.missing_info_types
     )
     return FollowUpResponse(followups=followups)
+
+
+@router.post("/ai/cleanup", response_model=CleanupResponse)
+async def cleanup(req: CleanupRequest):
+    result = await cleanup_transcript(req.raw_text)
+    return CleanupResponse(**result)

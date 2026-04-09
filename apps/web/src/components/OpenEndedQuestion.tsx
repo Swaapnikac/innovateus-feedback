@@ -12,6 +12,7 @@ interface OpenEndedQuestionProps {
   voiceEligible: boolean;
   onInputModeChange?: (mode: "text" | "voice") => void;
   onTranscriptReady?: (transcript: string) => void;
+  onRecordingStarted?: () => void;
 }
 
 export function OpenEndedQuestion({
@@ -20,6 +21,7 @@ export function OpenEndedQuestion({
   voiceEligible,
   onInputModeChange,
   onTranscriptReady,
+  onRecordingStarted,
 }: OpenEndedQuestionProps) {
   const [inputMode, setInputMode] = useState<"text" | "voice">(voiceEligible ? "voice" : "text");
 
@@ -42,7 +44,7 @@ export function OpenEndedQuestion({
             variant={inputMode === "text" ? "default" : "ghost"}
             size="sm"
             onClick={() => handleModeSwitch("text")}
-            className="gap-2 rounded-md"
+            className="gap-2 !rounded-md"
           >
             <Type className="h-4 w-4" />
             Type
@@ -52,7 +54,7 @@ export function OpenEndedQuestion({
             variant={inputMode === "voice" ? "default" : "ghost"}
             size="sm"
             onClick={() => handleModeSwitch("voice")}
-            className="gap-2 rounded-md"
+            className="gap-2 !rounded-md"
           >
             <Mic className="h-4 w-4" />
             Voice
@@ -61,16 +63,23 @@ export function OpenEndedQuestion({
       )}
 
       {inputMode === "text" ? (
-        <Textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="Type your response here..."
-          className="min-h-[120px] resize-y text-base"
-        />
+        <div className="space-y-1">
+          <Textarea
+            value={value}
+            onChange={(e) => onChange(e.target.value.slice(0, 5000))}
+            placeholder="Type your response here..."
+            className="min-h-[120px] resize-y text-base"
+            maxLength={5000}
+          />
+          <p className={`text-xs text-right ${value.length >= 4900 ? "text-brand-red" : "text-brand-blue/40"}`}>
+            {value.length}/5000
+          </p>
+        </div>
       ) : (
         <VoiceRecorder
           onTranscriptComplete={handleTranscriptComplete}
           initialTranscript={value}
+          onRecordingStarted={onRecordingStarted}
         />
       )}
     </div>

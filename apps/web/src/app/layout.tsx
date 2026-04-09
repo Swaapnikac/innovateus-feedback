@@ -1,10 +1,18 @@
 import type { Metadata } from "next";
-import { DM_Serif_Display, Libre_Franklin, Geist_Mono } from "next/font/google";
+import { DM_Serif_Display, DM_Serif_Text, Libre_Franklin, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
 const dmSerifDisplay = DM_Serif_Display({
   weight: "400",
+  style: ["normal", "italic"],
   variable: "--font-dm-serif-display",
+  subsets: ["latin"],
+});
+
+const dmSerifText = DM_Serif_Text({
+  weight: "400",
+  style: ["normal", "italic"],
+  variable: "--font-dm-serif-text",
   subsets: ["latin"],
 });
 
@@ -31,7 +39,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${dmSerifDisplay.variable} ${libreFranklin.variable} ${geistMono.variable} antialiased`}
+        className={`${dmSerifDisplay.variable} ${dmSerifText.variable} ${libreFranklin.variable} ${geistMono.variable} antialiased`}
       >
         {children}
       </body>

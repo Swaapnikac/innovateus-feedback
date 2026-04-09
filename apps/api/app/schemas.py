@@ -42,15 +42,15 @@ class StartSubmissionResponse(BaseModel):
 class AnswerRequest(BaseModel):
     question_id: str
     question_type: str
-    answer_raw: Optional[str] = None
+    answer_raw: Optional[str] = Field(None, max_length=5000)
     input_mode: str = "none"
-    transcript: Optional[str] = None
+    transcript: Optional[str] = Field(None, max_length=5000)
     is_vague: Optional[bool] = None
     followups_asked: int = 0
-    followup_1: Optional[str] = None
-    followup_1_answer: Optional[str] = None
-    followup_2: Optional[str] = None
-    followup_2_answer: Optional[str] = None
+    followup_1: Optional[str] = Field(None, max_length=500)
+    followup_1_answer: Optional[str] = Field(None, max_length=5000)
+    followup_2: Optional[str] = Field(None, max_length=500)
+    followup_2_answer: Optional[str] = Field(None, max_length=5000)
 
 
 class AnswerResponse(BaseModel):
@@ -59,8 +59,8 @@ class AnswerResponse(BaseModel):
 
 
 class VaguenessRequest(BaseModel):
-    question_text: str
-    answer_text: str
+    question_text: str = Field(..., max_length=500)
+    answer_text: str = Field(..., max_length=5000)
 
 
 class VaguenessResponse(BaseModel):
@@ -70,13 +70,22 @@ class VaguenessResponse(BaseModel):
 
 
 class FollowUpRequest(BaseModel):
-    question_text: str
-    answer_text: str
+    question_text: str = Field(..., max_length=500)
+    answer_text: str = Field(..., max_length=5000)
     missing_info_types: list[str]
 
 
 class FollowUpResponse(BaseModel):
     followups: list[str]
+
+
+class CleanupRequest(BaseModel):
+    raw_text: str = Field(..., max_length=5000)
+
+
+class CleanupResponse(BaseModel):
+    cleaned: str
+    changed: bool
 
 
 class CompleteSubmissionResponse(BaseModel):
@@ -176,3 +185,33 @@ class SurveyVersionSummary(BaseModel):
 
 class SurveyVersionDetail(SurveyVersionSummary):
     config: dict
+
+
+# ── Analytics Events ──
+
+class EventPayload(BaseModel):
+    event_type: str
+    event_data: dict = {}
+    timestamp: Optional[str] = None
+
+
+class TrackEventsRequest(BaseModel):
+    session_token: str
+    cohort_id: Optional[str] = None
+    submission_id: Optional[str] = None
+    events: list[EventPayload] = Field(..., max_length=10)
+
+
+class DropoutRequest(BaseModel):
+    session_token: str
+    cohort_id: str
+    submission_id: Optional[str] = None
+    last_question_id: str
+    questions_answered: int
+
+
+# ── Experience Rating ──
+
+class ExperienceRatingRequest(BaseModel):
+    rating: int = Field(..., ge=1, le=5)
+    feedback_text: Optional[str] = Field(None, max_length=500)

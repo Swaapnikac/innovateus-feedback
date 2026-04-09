@@ -3,12 +3,13 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Mic, Square, Check, Loader2, Volume2 } from "lucide-react";
+import { Mic, Square, Check, Loader2, Volume2, RotateCcw, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface VoiceRecorderProps {
   onTranscriptComplete: (transcript: string) => void;
   initialTranscript?: string;
+  onRecordingStarted?: () => void;
 }
 
 interface SpeechRecognitionEvent {
@@ -20,10 +21,15 @@ interface SpeechRecognitionErrorEvent {
   error: string;
 }
 
-export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "" }: VoiceRecorderProps) {
+export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", onRecordingStarted }: VoiceRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
   const [transcript, setTranscript] = useState(initialTranscript);
+  const [rawTranscript, setRawTranscript] = useState("");
+  const [enhancedTranscript, setEnhancedTranscript] = useState("");
+  const [wasEnhanced, setWasEnhanced] = useState(false);
+  const [showingOriginal, setShowingOriginal] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState("");
   const [hasRecorded, setHasRecorded] = useState(!!initialTranscript);
 
@@ -34,6 +40,36 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "" }: 
   const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const finalTranscriptRef = useRef("");
+
+  const enhanceTranscript = useCallback(async (raw: string) => {
+    if (!raw.trim()) return;
+    setRawTranscript(raw);
+    setTranscript(raw);
+    setHasRecorded(true);
+    setLiveTranscript("");
+    setWasEnhanced(false);
+    setShowingOriginal(false);
+
+    setIsEnhancing(true);
+    try {
+      const result = await api.cleanupTranscript(raw);
+      if (result.changed && result.cleaned.trim()) {
+        setEnhancedTranscript(result.cleaned);
+        setTranscript(result.cleaned);
+        setWasEnhanced(true);
+      }
+    } catch {
+      // Cleanup failed silently, raw transcript remains
+    } finally {
+      setIsEnhancing(false);
+    }
+  }, []);
+
+  const toggleOriginal = () => {
+    const next = !showingOriginal;
+    setShowingOriginal(next);
+    setTranscript(next ? rawTranscript : enhancedTranscript);
+  };
 
   const resetInactivityTimer = useCallback(() => {
     if (inactivityTimerRef.current) {
@@ -92,9 +128,7 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "" }: 
         const currentTranscript = finalTranscriptRef.current.trim();
 
         if (currentTranscript) {
-          setTranscript(currentTranscript);
-          setHasRecorded(true);
-          setLiveTranscript("");
+          enhanceTranscript(currentTranscript);
           return;
         }
 
@@ -105,18 +139,18 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "" }: 
           setIsTranscribing(true);
           try {
             const result = await api.transcribe(audioBlob);
+            setIsTranscribing(false);
             if (result.transcript && result.transcript.trim()) {
-              setTranscript(result.transcript);
-              setHasRecorded(true);
+              enhanceTranscript(result.transcript);
             } else {
               setTranscript(currentTranscript || "");
               setHasRecorded(true);
+              setLiveTranscript("");
             }
           } catch {
+            setIsTranscribing(false);
             setTranscript(currentTranscript || "");
             if (currentTranscript) setHasRecorded(true);
-          } finally {
-            setIsTranscribing(false);
             setLiveTranscript("");
           }
         } else {
@@ -175,6 +209,7 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "" }: 
 
       mediaRecorder.start(1000);
       setIsRecording(true);
+      onRecordingStarted?.();
       resetInactivityTimer();
     } catch {
       alert("Could not access microphone. Please check your browser permissions and ensure you're using HTTPS or localhost.");
@@ -200,6 +235,8 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "" }: 
     };
   }, []);
 
+  const isBusy = isTranscribing || isEnhancing;
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
@@ -207,9 +244,9 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "" }: 
           <Button
             type="button"
             onClick={startRecording}
-            disabled={isTranscribing}
+            disabled={isBusy}
             size="lg"
-            className="gap-2 bg-brand-blue hover:bg-brand-blue/90 h-12 px-6 text-base"
+            className="gap-2 bg-brand-blue hover:bg-brand-blue/90 text-base"
           >
             <Mic className="h-5 w-5" />
             {hasRecorded ? "Record Again" : "Start Recording"}
@@ -220,17 +257,17 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "" }: 
             onClick={stopRecording}
             size="lg"
             variant="destructive"
-            className="gap-2 h-12 px-6 text-base"
+            className="gap-2 text-base"
           >
             <Square className="h-5 w-5" />
             Stop Recording
           </Button>
         )}
 
-        {isTranscribing && (
+        {isBusy && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Enhancing transcript...
+            {isTranscribing ? "Transcribing audio..." : "Enhancing transcript..."}
           </div>
         )}
       </div>
@@ -246,28 +283,56 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "" }: 
             <Volume2 className="h-4 w-4 ml-auto animate-pulse" />
           </div>
           <div className="min-h-[60px] text-sm text-foreground/80 italic">
-            {liveTranscript || "Speak now — your words will appear here in real time..."}
+            {liveTranscript || "Speak now, your words will appear here in real time..."}
           </div>
         </div>
       )}
 
       {(hasRecorded || transcript) && !isRecording && (
         <div className="space-y-2">
-          <p className="text-sm font-medium text-muted-foreground">
-            Edit your transcript below if needed:
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-muted-foreground">
+              {isEnhancing ? "Enhancing your transcript..." : "Edit your transcript below if needed:"}
+            </p>
+            {wasEnhanced && !isEnhancing && (
+              <button
+                type="button"
+                onClick={toggleOriginal}
+                className="flex items-center gap-1 text-xs text-brand-blue/50 hover:text-brand-blue/80"
+              >
+                {showingOriginal ? (
+                  <><Sparkles className="h-3 w-3" /> Show enhanced</>
+                ) : (
+                  <><RotateCcw className="h-3 w-3" /> Show original</>
+                )}
+              </button>
+            )}
+          </div>
           <Textarea
             value={transcript}
-            onChange={(e) => setTranscript(e.target.value)}
+            onChange={(e) => setTranscript(e.target.value.slice(0, 5000))}
             className="min-h-[100px] resize-y text-base"
-            disabled={isTranscribing}
+            disabled={isBusy}
+            maxLength={5000}
           />
+          <div className="flex items-center justify-between">
+            <div>
+              {wasEnhanced && !isEnhancing && !showingOriginal && (
+                <span className="inline-flex items-center gap-1 text-xs text-brand-teal">
+                  <Sparkles className="h-3 w-3" /> Auto-enhanced
+                </span>
+              )}
+            </div>
+            <p className={`text-xs ${transcript.length >= 4900 ? "text-brand-red" : "text-brand-blue/40"}`}>
+              {transcript.length}/5000
+            </p>
+          </div>
           <Button
             type="button"
             onClick={handleDone}
-            disabled={!transcript.trim() || isTranscribing}
+            disabled={!transcript.trim() || isBusy}
             size="lg"
-            className="gap-2 bg-brand-teal hover:bg-brand-teal/90 h-11"
+            className="gap-2 bg-brand-teal hover:bg-brand-teal/90"
           >
             <Check className="h-5 w-5" />
             Use This Response

@@ -12,8 +12,10 @@ from app.schemas import (
     AnswerRequest,
     AnswerResponse,
     CompleteSubmissionResponse,
+    ExperienceRatingRequest,
 )
 from app.services.ai_service import extract_structured
+from app.services.pii_service import strip_pii
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -124,8 +126,12 @@ def save_answer(submission_id: uuid.UUID, req: AnswerRequest):
     item = items[0]
     answers = item.get("answers", [])
 
-    # Build answer data
+    # Build answer data with PII stripped
     answer_data = req.model_dump()
+    answer_data["answer_raw"] = strip_pii(answer_data.get("answer_raw"))
+    answer_data["transcript"] = strip_pii(answer_data.get("transcript"))
+    answer_data["followup_1_answer"] = strip_pii(answer_data.get("followup_1_answer"))
+    answer_data["followup_2_answer"] = strip_pii(answer_data.get("followup_2_answer"))
     answer_id = None
 
     # Check if answer for this question already exists
@@ -154,6 +160,65 @@ def save_answer(submission_id: uuid.UUID, req: AnswerRequest):
     return AnswerResponse(id=uuid.UUID(answer_id), question_id=req.question_id)
 
 
+def _build_answers_for_extraction(answers: list[dict]) -> list[dict]:
+    """Build the answer payload for AI extraction from stored answer records."""
+    result = []
+    for a in answers:
+        answer_data = {
+            "question_id": a.get("question_id"),
+            "question_type": a.get("question_type"),
+            "answer": a.get("answer_raw"),
+        }
+        if a.get("transcript"):
+            answer_data["transcript"] = a["transcript"]
+        if a.get("followup_1_answer"):
+            answer_data["followup_1"] = a.get("followup_1")
+            answer_data["followup_1_answer"] = a["followup_1_answer"]
+        if a.get("followup_2_answer"):
+            answer_data["followup_2"] = a.get("followup_2")
+            answer_data["followup_2_answer"] = a["followup_2_answer"]
+        result.append(answer_data)
+    return result
+
+
+_EMPTY_EXTRACTION = {
+    "what_was_tried": None,
+    "planned_task_or_workflow": None,
+    "outcome_or_expected_outcome": None,
+    "barriers": [],
+    "enablers": [],
+    "public_benefit": None,
+    "top_themes": [],
+    "success_story_candidate": None,
+}
+
+
+@router.post("/submissions/{submission_id}/preview-extraction", response_model=CompleteSubmissionResponse)
+async def preview_extraction(submission_id: uuid.UUID):
+    """Run AI extraction without marking submission as completed."""
+    subs_table = get_submissions_table()
+    sub_id_str = str(submission_id)
+
+    items = scan_all_items(
+        subs_table,
+        FilterExpression=Attr("submission_id").eq(sub_id_str),
+    )
+    if not items:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    item = items[0]
+    answers_for_extraction = _build_answers_for_extraction(item.get("answers", []))
+
+    extraction_data = None
+    try:
+        extraction_data = await extract_structured(answers_for_extraction)
+    except Exception as e:
+        logger.warning(f"Preview extraction failed for {submission_id}: {e}")
+        extraction_data = dict(_EMPTY_EXTRACTION)
+
+    return CompleteSubmissionResponse(status="preview", extraction=extraction_data)
+
+
 @router.post("/submissions/{submission_id}/complete", response_model=CompleteSubmissionResponse)
 async def complete_submission(submission_id: uuid.UUID, response: Response):
     subs_table = get_submissions_table()
@@ -169,25 +234,7 @@ async def complete_submission(submission_id: uuid.UUID, response: Response):
         raise HTTPException(status_code=404, detail="Submission not found")
 
     item = items[0]
-    answers = item.get("answers", [])
-
-    # Build answers for AI extraction
-    answers_for_extraction = []
-    for a in answers:
-        answer_data = {
-            "question_id": a.get("question_id"),
-            "question_type": a.get("question_type"),
-            "answer": a.get("answer_raw"),
-        }
-        if a.get("transcript"):
-            answer_data["transcript"] = a["transcript"]
-        if a.get("followup_1_answer"):
-            answer_data["followup_1"] = a.get("followup_1")
-            answer_data["followup_1_answer"] = a["followup_1_answer"]
-        if a.get("followup_2_answer"):
-            answer_data["followup_2"] = a.get("followup_2")
-            answer_data["followup_2_answer"] = a["followup_2_answer"]
-        answers_for_extraction.append(answer_data)
+    answers_for_extraction = _build_answers_for_extraction(item.get("answers", []))
 
     # Run AI extraction
     extraction_data = None
@@ -195,16 +242,7 @@ async def complete_submission(submission_id: uuid.UUID, response: Response):
         extraction_data = await extract_structured(answers_for_extraction)
     except Exception as e:
         logger.warning(f"Extraction failed for submission {submission_id}: {e}")
-        extraction_data = {
-            "what_was_tried": None,
-            "planned_task_or_workflow": None,
-            "outcome_or_expected_outcome": None,
-            "barriers": [],
-            "enablers": [],
-            "public_benefit": None,
-            "top_themes": [],
-            "success_story_candidate": None,
-        }
+        extraction_data = dict(_EMPTY_EXTRACTION)
 
     now = _now_iso()
     created_at = item.get("created_at", now)
@@ -258,3 +296,30 @@ async def complete_submission(submission_id: uuid.UUID, response: Response):
         )
 
     return CompleteSubmissionResponse(status="completed", extraction=extraction_data)
+
+
+@router.post("/submissions/{submission_id}/experience-rating")
+def save_experience_rating(submission_id: uuid.UUID, req: ExperienceRatingRequest):
+    subs_table = get_submissions_table()
+    sub_id_str = str(submission_id)
+
+    items = scan_all_items(
+        subs_table,
+        FilterExpression=Attr("submission_id").eq(sub_id_str),
+    )
+    if not items:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    item = items[0]
+    feedback_text = strip_pii(req.feedback_text) if req.feedback_text else None
+
+    subs_table.update_item(
+        Key={"pk": item["pk"], "sk": item["sk"]},
+        UpdateExpression="SET experience_rating = :r, experience_feedback = :f",
+        ExpressionAttributeValues={
+            ":r": req.rating,
+            ":f": feedback_text,
+        },
+    )
+
+    return {"status": "saved", "rating": req.rating}

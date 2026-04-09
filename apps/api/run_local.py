@@ -59,6 +59,29 @@ _client.create_table(
     BillingMode="PAY_PER_REQUEST",
 )
 
+_client.create_table(
+    TableName="innovateus-events",
+    KeySchema=[
+        {"AttributeName": "pk", "KeyType": "HASH"},
+        {"AttributeName": "sk", "KeyType": "RANGE"},
+    ],
+    AttributeDefinitions=[
+        {"AttributeName": "pk", "AttributeType": "S"},
+        {"AttributeName": "sk", "AttributeType": "S"},
+        {"AttributeName": "gsi1_pk", "AttributeType": "S"},
+        {"AttributeName": "gsi1_sk", "AttributeType": "S"},
+    ],
+    GlobalSecondaryIndexes=[{
+        "IndexName": "CohortEventIndex",
+        "KeySchema": [
+            {"AttributeName": "gsi1_pk", "KeyType": "HASH"},
+            {"AttributeName": "gsi1_sk", "KeyType": "RANGE"},
+        ],
+        "Projection": {"ProjectionType": "ALL"},
+    }],
+    BillingMode="PAY_PER_REQUEST",
+)
+
 # Seed
 from seed import seed
 seed()

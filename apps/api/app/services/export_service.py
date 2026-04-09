@@ -82,6 +82,11 @@ def generate_raw_csv(
         headers.extend([f"Q{i}", f"A{i}", f"A{i}_Voice"])
         for j in range(1, max_followups[qid] + 1):
             headers.extend([f"Q{i}_FQ{j}", f"Q{i}_FA{j}"])
+    headers.extend([
+        "TimeToCompleteSec", "VoiceQuestionsUsed", "TextQuestionsUsed",
+        "FollowupsReceived", "FollowupsAnswered",
+        "ExperienceRating", "ExperienceFeedback",
+    ])
     writer.writerow(headers)
 
     # Data rows
@@ -101,6 +106,21 @@ def generate_raw_csv(
                     row.extend([a.get("followup_2") or "", a.get("followup_2_answer") or ""])
                 else:
                     row.extend(["", ""])
+        # New analytics columns
+        all_answers = list(answers.values())
+        voice_used = sum(1 for a in all_answers if a.get("input_mode") == "voice")
+        text_used = sum(1 for a in all_answers if a.get("input_mode") not in ("voice", "none") or (a.get("question_type") == "open" and a.get("input_mode") != "voice"))
+        followups_received = sum(1 for a in all_answers if a.get("followups_asked", 0) > 0 or a.get("followup_1"))
+        followups_answered = sum(1 for a in all_answers if a.get("followup_1_answer"))
+        row.extend([
+            str(sub.get("time_to_complete_sec") or ""),
+            str(voice_used),
+            str(text_used),
+            str(followups_received),
+            str(followups_answered),
+            str(sub.get("experience_rating") or ""),
+            sub.get("experience_feedback") or "",
+        ])
         writer.writerow(row)
 
     return output.getvalue()
@@ -116,7 +136,7 @@ def generate_structured_csv(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["RespondentID", "CourseName", "SurveyVersion", "MainQuestion", "FollowUpQuestions", "Answers", "VoiceUsed"])
+    writer.writerow(["RespondentID", "CourseName", "SurveyVersion", "MainQuestion", "FollowUpQuestions", "Answers", "VoiceUsed", "IsVague", "FollowupsAsked", "FollowupAnswered", "ExperienceRating"])
 
     respondent_id = 0
 
@@ -148,6 +168,10 @@ def generate_structured_csv(
 
             voice_used = "Yes" if a.get("input_mode") == "voice" else "No"
 
+            is_vague = "Yes" if a.get("is_vague") else "No" if a.get("is_vague") is not None else ""
+            followups_asked = str(a.get("followups_asked", 0))
+            followup_answered = "Yes" if a.get("followup_1_answer") else "No" if a.get("followup_1") else ""
+
             writer.writerow([
                 respondent_id,
                 course_name,
@@ -156,6 +180,10 @@ def generate_structured_csv(
                 " | ".join(followup_qs),
                 " | ".join(answer_parts),
                 voice_used,
+                is_vague,
+                followups_asked,
+                followup_answered,
+                str(sub.get("experience_rating") or ""),
             ])
 
     return output.getvalue()
@@ -377,3 +405,76 @@ def generate_summary_pptx(
     buffer = io.BytesIO()
     prs.save(buffer)
     return buffer.getvalue()
+
+
+def generate_user_testing_csv(
+    submissions: list[dict],
+    events: list[dict],
+    cohort_id: Optional[uuid.UUID] = None,
+) -> str:
+    """Generate a CSV focused on user testing metrics with one row per submission."""
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "SubmissionId", "CohortId", "Status", "StartedAt", "CompletedAt",
+        "TimeToCompleteSec", "SurveyVersion",
+        "TotalQuestionsAnswered", "VoiceQuestionsCount", "TextQuestionsCount",
+        "FollowupsTriggered", "FollowupsAnswered", "FollowupsSkipped",
+        "VagueAnswersVoice", "VagueAnswersText",
+        "ExperienceRating", "ExperienceFeedback",
+        "ReviewEdits",
+    ])
+
+    # Build event lookup: submission_id -> list of events
+    events_by_sub: dict[str, list[dict]] = {}
+    for evt in events:
+        sid = evt.get("submission_id", "")
+        if sid:
+            events_by_sub.setdefault(sid, []).append(evt)
+
+    # Also count review edits by session
+    review_edits_by_session: dict[str, int] = {}
+    for evt in events:
+        if evt.get("event_type") == "review_edit":
+            session = evt.get("session_token", "")
+            review_edits_by_session[session] = review_edits_by_session.get(session, 0) + 1
+
+    for sub in submissions:
+        sub_id = sub.get("submission_id", "")
+        answers = sub.get("answers", [])
+        open_answers = [a for a in answers if a.get("question_type") == "open"]
+
+        voice_count = sum(1 for a in open_answers if a.get("input_mode") == "voice")
+        text_count = sum(1 for a in open_answers if a.get("input_mode") != "voice")
+        followups_triggered = sum(1 for a in answers if a.get("followup_1"))
+        followups_answered = sum(1 for a in answers if a.get("followup_1_answer"))
+        followups_skipped = followups_triggered - followups_answered
+        vague_voice = sum(1 for a in open_answers if a.get("is_vague") and a.get("input_mode") == "voice")
+        vague_text = sum(1 for a in open_answers if a.get("is_vague") and a.get("input_mode") != "voice")
+
+        # Count review edits from events for this submission
+        sub_events = events_by_sub.get(sub_id, [])
+        review_edit_count = sum(1 for e in sub_events if e.get("event_type") == "review_edit")
+
+        writer.writerow([
+            sub_id,
+            sub.get("cohort_id", ""),
+            sub.get("status", ""),
+            sub.get("created_at", ""),
+            sub.get("completed_at", ""),
+            str(sub.get("time_to_complete_sec") or ""),
+            sub.get("survey_version", ""),
+            str(len(answers)),
+            str(voice_count),
+            str(text_count),
+            str(followups_triggered),
+            str(followups_answered),
+            str(followups_skipped),
+            str(vague_voice),
+            str(vague_text),
+            str(sub.get("experience_rating") or ""),
+            sub.get("experience_feedback") or "",
+            str(review_edit_count),
+        ])
+
+    return output.getvalue()
