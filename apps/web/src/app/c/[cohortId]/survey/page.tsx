@@ -41,6 +41,7 @@ export default function SurveyPage() {
   const [checkingVagueness, setCheckingVagueness] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [editReturnMode, setEditReturnMode] = useState(false);
+  const [irrelevantError, setIrrelevantError] = useState("");
 
   const submissionId = typeof window !== "undefined" ? sessionStorage.getItem("submission_id") : null;
 
@@ -127,6 +128,7 @@ export default function SurveyPage() {
     answers[qId] || defaultAnswer;
 
   const updateAnswer = (qId: string, update: Partial<AnswerState>) => {
+    if (irrelevantError && update.value !== undefined) setIrrelevantError("");
     setAnswers((prev) => ({
       ...prev,
       [qId]: { ...(prev[qId] || defaultAnswer), ...update },
@@ -200,6 +202,7 @@ export default function SurveyPage() {
 
   const handleNext = async () => {
     if (!currentQuestion) return;
+    setIrrelevantError("");
     const ans = getAnswer(currentQuestion.id);
 
     const needsVaguenessCheck =
@@ -215,6 +218,15 @@ export default function SurveyPage() {
       try {
         const result = await api.checkVagueness(currentQuestion.text, ans.value);
 
+        // Irrelevant answer: show error, don't advance, don't follow up
+        if (result.is_irrelevant) {
+          setIrrelevantError("Your answer doesn't seem related to this question. Please try again or skip to the next question.");
+          updateAnswer(currentQuestion.id, { isVague: undefined });
+          setCheckingVagueness(false);
+          return;
+        }
+
+        // Vague answer: ask follow-ups only if AI thinks they'd help
         if (result.is_vague) {
           const followupResult = await api.getFollowups(
             currentQuestion.text,
@@ -235,8 +247,10 @@ export default function SurveyPage() {
             setCheckingVagueness(false);
             return;
           }
+          // Follow-up model returned empty array (answer doesn't need follow-ups)
         }
 
+        // Specific answer or no follow-ups needed: advance
         updateAnswer(currentQuestion.id, {
           isVague: result.is_vague,
           missingInfoTypes: result.missing_info_types,
@@ -372,6 +386,22 @@ export default function SurveyPage() {
               />
             )}
           </QuestionCard>
+        )}
+
+        {irrelevantError && (
+          <div className="max-w-3xl mx-auto bg-brand-red/5 border border-brand-red/20 rounded-xl px-4 py-3 flex items-start gap-3">
+            <span className="text-brand-red text-lg shrink-0">!</span>
+            <div>
+              <p className="text-sm text-brand-red/80">{irrelevantError}</p>
+              <button
+                type="button"
+                onClick={() => setIrrelevantError("")}
+                className="text-xs text-brand-red/50 hover:text-brand-red/80 mt-1 underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
         )}
 
         <div className="flex justify-between max-w-3xl mx-auto">

@@ -170,13 +170,13 @@ export default function ReviewPage() {
 
         {/* Answer Cards */}
         <div className="space-y-3">
-          {answeredQuestions.map((q, i) => {
+          {visibleQuestions.map((q, i) => {
             const ans = answers[q.id];
-            if (!ans) return null;
-            const displayAnswer = formatAnswer(q, ans);
+            const hasAnswer = ans && (q.type === "multi" ? ans.multiValues.length > 0 : ans.value.trim().length > 0);
+            const displayAnswer = hasAnswer ? formatAnswer(q, ans) : null;
 
             return (
-              <Card key={q.id} className="bg-white border-0 shadow-sm rounded-2xl">
+              <Card key={q.id} className={`bg-white border-0 shadow-sm rounded-2xl ${!hasAnswer ? "opacity-70" : ""}`}>
                 <CardContent className="pt-5 pb-4">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
@@ -184,18 +184,24 @@ export default function ReviewPage() {
                         Question {i + 1}
                       </p>
                       <p className="text-sm font-medium text-brand-blue mb-3">{q.text}</p>
-                      <p className="text-xs font-semibold text-brand-teal/60 uppercase tracking-wider mb-1">Your Answer</p>
-                      <p className="text-sm text-brand-blue/70 whitespace-pre-wrap bg-brand-light-blue/40 rounded-lg px-3 py-2">{displayAnswer}</p>
-                      {ans.followupAnswers?.followup_1_answer && (
-                        <div className="mt-2 pl-3 border-l-2 border-brand-yellow/40">
-                          <p className="text-xs text-brand-blue/40 mb-0.5">Follow-up</p>
-                          <p className="text-sm text-brand-blue/60">{ans.followupAnswers.followup_1_answer}</p>
-                        </div>
-                      )}
-                      {ans.followupAnswers?.followup_2_answer && (
-                        <div className="mt-1 pl-3 border-l-2 border-brand-yellow/40">
-                          <p className="text-sm text-brand-blue/60">{ans.followupAnswers.followup_2_answer}</p>
-                        </div>
+                      {hasAnswer ? (
+                        <>
+                          <p className="text-xs font-semibold text-brand-teal/60 uppercase tracking-wider mb-1">Your Answer</p>
+                          <p className="text-sm text-brand-blue/70 whitespace-pre-wrap bg-brand-light-blue/40 rounded-lg px-3 py-2">{displayAnswer}</p>
+                          {ans?.followupAnswers?.followup_1_answer && (
+                            <div className="mt-2 pl-3 border-l-2 border-brand-yellow/40">
+                              <p className="text-xs text-brand-blue/40 mb-0.5">Follow-up</p>
+                              <p className="text-sm text-brand-blue/60">{ans.followupAnswers.followup_1_answer}</p>
+                            </div>
+                          )}
+                          {ans?.followupAnswers?.followup_2_answer && (
+                            <div className="mt-1 pl-3 border-l-2 border-brand-yellow/40">
+                              <p className="text-sm text-brand-blue/60">{ans.followupAnswers.followup_2_answer}</p>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-sm italic text-brand-blue/30">Skipped</p>
                       )}
                     </div>
                     <Button
@@ -205,7 +211,7 @@ export default function ReviewPage() {
                       className="shrink-0 gap-1.5 border-brand-blue/15 text-brand-blue/60 hover:bg-brand-blue/5"
                     >
                       <Pencil className="h-3.5 w-3.5" />
-                      Edit
+                      {hasAnswer ? "Edit" : "Answer"}
                     </Button>
                   </div>
                 </CardContent>

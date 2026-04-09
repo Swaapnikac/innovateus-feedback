@@ -26,7 +26,7 @@ def _has_api_key() -> bool:
 
 async def detect_vagueness(question_text: str, answer_text: str) -> dict:
     if not _has_api_key():
-        return {"is_vague": False, "reason": "AI analysis unavailable", "missing_info_types": []}
+        return {"is_vague": False, "is_irrelevant": False, "reason": "AI analysis unavailable", "missing_info_types": []}
 
     try:
         client = _get_client()
@@ -51,12 +51,13 @@ async def detect_vagueness(question_text: str, answer_text: str) -> dict:
         result = json.loads(response.choices[0].message.content)
         return {
             "is_vague": result.get("is_vague", False),
+            "is_irrelevant": result.get("is_irrelevant", False),
             "reason": result.get("reason", ""),
             "missing_info_types": result.get("missing_info_types", []),
         }
     except Exception as e:
         logger.warning(f"Vagueness detection failed: {e}")
-        return {"is_vague": False, "reason": "Analysis unavailable", "missing_info_types": []}
+        return {"is_vague": False, "is_irrelevant": False, "reason": "Analysis unavailable", "missing_info_types": []}
 
 
 async def generate_followups(

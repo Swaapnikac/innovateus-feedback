@@ -65,6 +65,7 @@ class VaguenessRequest(BaseModel):
 
 class VaguenessResponse(BaseModel):
     is_vague: bool
+    is_irrelevant: bool = False
     reason: str
     missing_info_types: list[str]
 

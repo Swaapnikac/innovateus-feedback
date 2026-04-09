@@ -68,6 +68,7 @@ export interface SurveyVersionDetail extends SurveyVersionSummary {
 
 export interface VaguenessResult {
   is_vague: boolean;
+  is_irrelevant: boolean;
   reason: string;
   missing_info_types: string[];
 }
