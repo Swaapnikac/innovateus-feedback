@@ -2,23 +2,43 @@
 node_modules/
 __pycache__/
 *.pyc
+*.pyo
 venv/
 .venv/
+env/
 
 # Build
 .next/
 out/
 dist/
 *.egg-info/
+build/
+lambda-package/
+lambda-deployment.zip
 
-# Environment
+# Environment — never commit secrets
 .env
 .env.local
+.env.production
+.env.staging
 .env.*.local
+.env.*
+!.env.example
 
-# IDE
+# Private keys & certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.cer
+*.crt
+
+# IDE & editor configs
 .vscode/
 .idea/
+.cursor/
+.claude/
 *.swp
 *.swo
 
@@ -37,5 +57,10 @@ npm-debug.log*
 # Office temp lock files
 ~$*
 
-# Local comparison docs
-docs/DATABASE_COMPARISON_RDS_vs_DynamoDB.docx
+# Docs folder (local only — not for repo)
+docs/
+QUICKSTART_AWS.md
+generate_arch_doc.py
+
+# AWS scripts (local tooling — not for repo)
+aws/
