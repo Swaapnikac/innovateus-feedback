@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from mangum import Mangum
 from app.config import get_settings
 from app.routers import survey, submissions, transcribe, ai, admin, editor, jotform, events
 
@@ -30,13 +29,9 @@ app.include_router(events.router, prefix="/v1", tags=["events"])
 
 @app.get("/")
 def root():
-    return {"service": "InnovateUS Feedback API", "version": "2.0.0", "database": "DynamoDB", "docs": "/docs"}
+    return {"service": "InnovateUS Feedback API", "version": "2.0.0", "database": "PostgreSQL", "docs": "/docs"}
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
-
-# AWS Lambda handler via Mangum
-handler = Mangum(app)

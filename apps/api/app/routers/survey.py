@@ -3,8 +3,11 @@ import json
 import random
 import uuid
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, Response
-from app.dynamo import get_surveys_table, decimals_to_native
+from fastapi import APIRouter, HTTPException, Response, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.db import get_db
+from app.models import Cohort
 
 router = APIRouter()
 
@@ -78,12 +81,11 @@ def _fix_conditional_order(questions: list[dict]) -> None:
 
 
 @router.get("/survey/{cohort_id}")
-def get_survey(cohort_id: uuid.UUID, response: Response):
-    table = get_surveys_table()
-    result = table.get_item(Key={"pk": f"COHORT#{cohort_id}", "sk": "METADATA"})
-    item = result.get("Item")
+async def get_survey(cohort_id: uuid.UUID, response: Response, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Cohort).where(Cohort.id == cohort_id))
+    cohort = result.scalar_one_or_none()
 
-    config = decimals_to_native(item.get("survey_config")) if item else None
+    config = cohort.survey_config if cohort else None
     if not config:
         try:
             config = _load_default_survey()
