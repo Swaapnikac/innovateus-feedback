@@ -2,12 +2,8 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # AWS
-    aws_region: str = "us-east-1"
-    dynamodb_endpoint_url: str = ""  # Set to "http://localhost:8000" for DynamoDB Local
-    surveys_table_name: str = "innovateus-surveys"
-    submissions_table_name: str = "innovateus-submissions"
-    events_table_name: str = "innovateus-events"
+    # PostgreSQL
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/innovateus"
     # OpenAI
     openai_api_key: str = ""
     # Auth
@@ -22,7 +18,7 @@ class Settings(BaseSettings):
     jotform_api_key: str = ""
     jotform_form_id: str = ""
     jotform_api_url: str = "https://api.jotform.com"
-    # OpenAI Models (override via env vars for latest models)
+    # OpenAI Models
     openai_model_vagueness: str = "gpt-4.1-nano"
     openai_model_followups: str = "gpt-4.1-mini"
     openai_model_extraction: str = "gpt-4.1"
@@ -33,6 +29,15 @@ class Settings(BaseSettings):
     environment: str = "development"
 
     model_config = {"env_file": "../../.env", "env_file_encoding": "utf-8", "extra": "ignore", "env_ignore_empty": True}
+
+    @property
+    def async_database_url(self) -> str:
+        url = self.database_url
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        return url
 
 
 _settings_instance = None
