@@ -1,7 +1,6 @@
-"""Export service — generates CSV, PDF, and PPTX from DynamoDB submission data.
+"""Export service — generates CSV, PDF, and PPTX from submission data.
 
-All functions now receive pre-fetched submission dicts (from DynamoDB)
-instead of taking a database session.
+All functions receive pre-fetched submission dicts instead of a database session.
 """
 import io
 import csv
@@ -9,7 +8,6 @@ import json
 import uuid
 from pathlib import Path
 from typing import Optional
-from app.dynamo import get_surveys_table
 
 SURVEY_CONFIG_PATH = Path(__file__).resolve().parents[4] / "docs" / "survey-config" / "survey-en.json"
 
@@ -26,16 +24,7 @@ def _load_questions() -> list[tuple[str, str]]:
 
 
 def _get_cohort_info(cohort_id: Optional[uuid.UUID]) -> tuple[str, str]:
-    """Return (course_name, survey_version) for a cohort."""
-    if not cohort_id:
-        return ("", "1.0")
-    table = get_surveys_table()
-    result = table.get_item(Key={"pk": f"COHORT#{cohort_id}", "sk": "METADATA"})
-    item = result.get("Item")
-    if item:
-        config = item.get("survey_config") or {}
-        version = config.get("version", "1.0")
-        return (item.get("course_name", ""), version)
+    """Return (course_name, survey_version) — caller should pass cohort data directly if available."""
     return ("", "1.0")
 
 
@@ -197,15 +186,12 @@ def _gather_report_data(
     course_name = ""
     survey_version = "1.0"
 
-    if cohort_id:
-        table = get_surveys_table()
-        result = table.get_item(Key={"pk": f"COHORT#{cohort_id}", "sk": "METADATA"})
-        item = result.get("Item")
-        if item:
-            cohort_name = item.get("name", "")
-            course_name = item.get("course_name", "")
-            config = item.get("survey_config") or {}
-            survey_version = config.get("version", "1.0")
+    if submissions:
+        # Pick cohort info from the first submission's data if available
+        first = submissions[0]
+        cohort_name = first.get("cohort_name", "")
+        course_name = first.get("course_name", "")
+        survey_version = first.get("survey_version") or "1.0"
 
     total = len(submissions)
     scores = []

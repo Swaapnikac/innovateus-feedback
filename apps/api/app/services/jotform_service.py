@@ -1,17 +1,12 @@
-"""JotForm integration — push completed submissions via JotForm API.
-
-Rewritten for DynamoDB: reads submission data from DynamoDB instead of SQLAlchemy.
-"""
+"""JotForm integration — push completed submissions via JotForm API."""
 import json
 import logging
 import uuid
 from datetime import datetime, timezone
 
 import httpx
-from boto3.dynamodb.conditions import Attr
 
 from app.config import get_settings
-from app.dynamo import get_submissions_table, get_surveys_table
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +28,6 @@ def _is_configured() -> bool:
     return bool(s.jotform_api_key and s.jotform_form_id)
 
 
-def _get_field_map() -> dict[str, str]:
-    return DEFAULT_FIELD_MAP
-
-
 def _format_answer_value(answer_raw: str | None, question_type: str | None) -> str:
     if not answer_raw:
         return ""
@@ -50,9 +41,8 @@ def _format_answer_value(answer_raw: str | None, question_type: str | None) -> s
     return answer_raw
 
 
-def _build_submission_data(submission: dict, cohort: dict | None) -> dict[str, str]:
-    """Build a flat dict for the JotForm API from a DynamoDB submission item."""
-    field_map = _get_field_map()
+def _build_submission_data(submission: dict, cohort_name: str, course_name: str) -> dict[str, str]:
+    field_map = DEFAULT_FIELD_MAP
     data: dict[str, str] = {}
     answers = {a["question_id"]: a for a in submission.get("answers", [])}
 
@@ -88,8 +78,8 @@ def _build_submission_data(submission: dict, cohort: dict | None) -> dict[str, s
 
     metadata = {
         "submission_id": submission.get("submission_id", ""),
-        "cohort_name": cohort.get("name", "") if cohort else "",
-        "course_name": cohort.get("course_name", "") if cohort else "",
+        "cohort_name": cohort_name,
+        "course_name": course_name,
         "survey_version": submission.get("survey_version") or "",
         "completed_at": submission.get("completed_at") or "",
         "time_to_complete_sec": str(submission.get("time_to_complete_sec") or ""),
@@ -103,10 +93,10 @@ def _build_submission_data(submission: dict, cohort: dict | None) -> dict[str, s
         metadata["ext_what_was_tried"] = extraction.get("what_was_tried") or ""
         metadata["ext_planned_workflow"] = extraction.get("planned_task_or_workflow") or ""
         metadata["ext_outcome"] = extraction.get("outcome_or_expected_outcome") or ""
-        metadata["ext_barriers"] = " | ".join(extraction.get("barriers", []))
-        metadata["ext_enablers"] = " | ".join(extraction.get("enablers", []))
+        metadata["ext_barriers"] = " | ".join(extraction.get("barriers") or [])
+        metadata["ext_enablers"] = " | ".join(extraction.get("enablers") or [])
         metadata["ext_public_benefit"] = extraction.get("public_benefit") or ""
-        metadata["ext_top_themes"] = " | ".join(extraction.get("top_themes", []))
+        metadata["ext_top_themes"] = " | ".join(extraction.get("top_themes") or [])
         metadata["ext_success_story"] = extraction.get("success_story_candidate") or ""
 
     data["submission[13]"] = json.dumps(metadata, ensure_ascii=False)
@@ -140,47 +130,81 @@ async def push_to_jotform(submission_data: dict[str, str], submission_id: uuid.U
 
 
 async def sync_submission(submission_id: uuid.UUID) -> dict:
-    """Load a completed submission from DynamoDB and push it to JotForm."""
     if not _is_configured():
         return {"success": False, "error": "JotForm not configured"}
 
     try:
-        subs_table = get_submissions_table()
-        surveys_table = get_surveys_table()
+        from sqlalchemy import select
+        from app.db import async_session
+        from app.models import Submission, Answer, Extraction, Cohort
 
-        from app.dynamo import scan_all_items
-        items = scan_all_items(
-            subs_table,
-            FilterExpression=Attr("submission_id").eq(str(submission_id)),
-        )
-        if not items:
-            return {"success": False, "error": "Submission not found"}
+        async with async_session() as db:
+            sub_result = await db.execute(select(Submission).where(Submission.id == submission_id))
+            sub = sub_result.scalar_one_or_none()
 
-        submission = items[0]
+            if not sub:
+                return {"success": False, "error": "Submission not found"}
+            if sub.status != "completed":
+                return {"success": False, "error": "Submission not completed"}
+            if sub.jotform_synced_at:
+                return {"success": True, "error": None}
 
-        if submission.get("status") != "completed":
-            return {"success": False, "error": "Submission not completed"}
+            cohort_result = await db.execute(select(Cohort).where(Cohort.id == sub.cohort_id))
+            cohort = cohort_result.scalar_one_or_none()
 
-        if submission.get("jotform_synced_at"):
-            return {"success": True, "error": None}
+            answers_result = await db.execute(select(Answer).where(Answer.submission_id == submission_id))
+            answers = answers_result.scalars().all()
 
-        cohort_id = submission.get("cohort_id")
-        cohort_result = surveys_table.get_item(
-            Key={"pk": f"COHORT#{cohort_id}", "sk": "METADATA"}
-        )
-        cohort = cohort_result.get("Item")
+            ext_result = await db.execute(select(Extraction).where(Extraction.submission_id == submission_id))
+            extraction = ext_result.scalar_one_or_none()
 
-        submission_data = _build_submission_data(submission, cohort)
-        push_result = await push_to_jotform(submission_data, submission_id)
+            answers_list = [
+                {
+                    "question_id": a.question_id,
+                    "question_type": a.question_type,
+                    "answer_raw": a.answer_raw,
+                    "input_mode": a.input_mode,
+                    "followup_1": a.followup_1,
+                    "followup_1_answer": a.followup_1_answer,
+                    "followup_2": a.followup_2,
+                    "followup_2_answer": a.followup_2_answer,
+                }
+                for a in answers
+            ]
 
-        if push_result["success"]:
-            subs_table.update_item(
-                Key={"pk": submission["pk"], "sk": submission["sk"]},
-                UpdateExpression="SET jotform_synced_at = :now",
-                ExpressionAttributeValues={":now": datetime.now(timezone.utc).isoformat()},
-            )
+            ext_dict = None
+            if extraction:
+                ext_dict = {
+                    "what_was_tried": extraction.what_was_tried,
+                    "planned_task_or_workflow": extraction.planned_task_or_workflow,
+                    "outcome_or_expected_outcome": extraction.outcome_or_expected_outcome,
+                    "barriers": extraction.barriers,
+                    "enablers": extraction.enablers,
+                    "public_benefit": extraction.public_benefit,
+                    "top_themes": extraction.top_themes,
+                    "success_story_candidate": extraction.success_story_candidate,
+                }
 
-        return push_result
+            submission_dict = {
+                "submission_id": str(sub.id),
+                "survey_version": sub.survey_version,
+                "completed_at": sub.completed_at.isoformat() if sub.completed_at else None,
+                "time_to_complete_sec": sub.time_to_complete_sec,
+                "answers": answers_list,
+                "extraction": ext_dict,
+            }
+
+            cohort_name = cohort.name if cohort else ""
+            course_name = cohort.course_name if cohort else ""
+
+            submission_data = _build_submission_data(submission_dict, cohort_name, course_name)
+            push_result = await push_to_jotform(submission_data, submission_id)
+
+            if push_result["success"]:
+                sub.jotform_synced_at = datetime.now(timezone.utc)
+                await db.commit()
+
+            return push_result
 
     except Exception as e:
         error_msg = f"Unexpected error: {e}"
