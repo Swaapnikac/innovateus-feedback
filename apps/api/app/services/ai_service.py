@@ -97,6 +97,46 @@ async def generate_followups(
         return []
 
 
+async def detect_vagueness_with_followups(question_text: str, answer_text: str) -> dict:
+    """Single LLM call: classify vagueness AND generate follow-ups together.
+    Cuts latency from ~3s (two sequential calls) to ~1.5s (one call)."""
+    if not _has_api_key():
+        return {"is_vague": False, "is_irrelevant": False, "reason": "AI analysis unavailable", "missing_info_types": [], "followups": []}
+
+    try:
+        client = _get_client()
+        system_prompt = _load_prompt("vagueness_with_followups")
+
+        response = await client.chat.completions.create(
+            model=get_settings().openai_model_followups,  # mini for quality follow-ups
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": json.dumps({
+                        "question": question_text,
+                        "answer": answer_text,
+                    }),
+                },
+            ],
+            temperature=0.2,
+        )
+
+        result = json.loads(response.choices[0].message.content)
+        followups = result.get("followups", [])
+        return {
+            "is_vague": result.get("is_vague", False),
+            "is_irrelevant": result.get("is_irrelevant", False),
+            "reason": result.get("reason", ""),
+            "missing_info_types": result.get("missing_info_types", []),
+            "followups": followups[:2],
+        }
+    except Exception as e:
+        logger.warning(f"Combined vagueness+followup detection failed: {e}")
+        return {"is_vague": False, "is_irrelevant": False, "reason": "Analysis unavailable", "missing_info_types": [], "followups": []}
+
+
 async def cleanup_transcript(raw_text: str) -> dict:
     if not _has_api_key():
         return {"cleaned": raw_text, "changed": False}

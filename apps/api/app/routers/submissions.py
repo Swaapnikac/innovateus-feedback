@@ -85,10 +85,10 @@ async def start_submission(req: StartSubmissionRequest, request: Request, db: As
         survey_version=cohort.active_version,
         ip_hash=ip_hash,
         client_metadata=req.client_metadata,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.utcnow(),
     )
     db.add(submission)
-    await db.flush()
+    await db.commit()
 
     return StartSubmissionResponse(submission_id=submission.id)
 
@@ -155,7 +155,7 @@ async def save_answer(submission_id: uuid.UUID, req: AnswerRequest, db: AsyncSes
         )
         db.add(answer)
 
-    await db.flush()
+    await db.commit()
     return AnswerResponse(id=answer_id, question_id=req.question_id)
 
 
@@ -230,13 +230,14 @@ async def complete_submission(submission_id: uuid.UUID, response: Response, db: 
         logger.warning(f"Extraction failed for submission {submission_id}: {e}")
         extraction_data = dict(_EMPTY_EXTRACTION)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     time_to_complete = None
     if sub.created_at:
         try:
             created = sub.created_at
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
+            # strip tz if present so both are naive UTC
+            if created.tzinfo is not None:
+                created = created.replace(tzinfo=None)
             time_to_complete = int((now - created).total_seconds())
         except Exception:
             pass
@@ -271,7 +272,7 @@ async def complete_submission(submission_id: uuid.UUID, response: Response, db: 
         )
         db.add(ext)
 
-    await db.flush()
+    await db.commit()
 
     # Qualtrics sync
     try:
@@ -308,6 +309,6 @@ async def save_experience_rating(submission_id: uuid.UUID, req: ExperienceRating
 
     sub.experience_rating = req.rating
     sub.experience_feedback = strip_pii(req.feedback_text) if req.feedback_text else None
-    await db.flush()
+    await db.commit()
 
     return {"status": "saved", "rating": req.rating}

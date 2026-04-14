@@ -28,7 +28,7 @@ def _get_client_ip(request: Request) -> str:
 @router.post("/events", status_code=status.HTTP_202_ACCEPTED)
 async def track_events(req: TrackEventsRequest, request: Request, db: AsyncSession = Depends(get_db)):
     ip_hash = _hash_ip(_get_client_ip(request))
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.utcnow().isoformat()
 
     for evt in req.events:
         event = Event(
@@ -39,11 +39,11 @@ async def track_events(req: TrackEventsRequest, request: Request, db: AsyncSessi
             event_type=evt.event_type,
             event_data=evt.event_data,
             ip_hash=ip_hash,
-            timestamp=datetime.fromisoformat(evt.timestamp) if evt.timestamp else datetime.now(timezone.utc),
+            timestamp=datetime.fromisoformat(evt.timestamp).replace(tzinfo=None) if evt.timestamp else datetime.utcnow(),
         )
         db.add(event)
 
-    await db.flush()
+    await db.commit()
     return {"status": "accepted", "count": len(req.events)}
 
 
@@ -62,9 +62,9 @@ async def track_dropout(req: DropoutRequest, request: Request, db: AsyncSession 
             "questions_answered": req.questions_answered,
         },
         ip_hash=ip_hash,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.utcnow(),
     )
     db.add(event)
-    await db.flush()
+    await db.commit()
 
     return {"status": "accepted"}

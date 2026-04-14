@@ -80,6 +80,14 @@ class FollowUpResponse(BaseModel):
     followups: list[str]
 
 
+class VaguenessWithFollowupsResponse(BaseModel):
+    is_vague: bool
+    is_irrelevant: bool = False
+    reason: str
+    missing_info_types: list[str]
+    followups: list[str]
+
+
 class CleanupRequest(BaseModel):
     raw_text: str = Field(..., max_length=5000)
 

@@ -10,6 +10,7 @@ interface OpenEndedQuestionProps {
   value: string;
   onChange: (value: string) => void;
   voiceEligible: boolean;
+  initialInputMode?: "text" | "voice";
   onInputModeChange?: (mode: "text" | "voice") => void;
   onTranscriptReady?: (transcript: string) => void;
   onRecordingStarted?: () => void;
@@ -19,11 +20,14 @@ export function OpenEndedQuestion({
   value,
   onChange,
   voiceEligible,
+  initialInputMode,
   onInputModeChange,
   onTranscriptReady,
   onRecordingStarted,
 }: OpenEndedQuestionProps) {
-  const [inputMode, setInputMode] = useState<"text" | "voice">(voiceEligible ? "voice" : "text");
+  const [inputMode, setInputMode] = useState<"text" | "voice">(
+    initialInputMode ?? (voiceEligible ? "voice" : "text")
+  );
 
   const handleModeSwitch = (mode: "text" | "voice") => {
     setInputMode(mode);

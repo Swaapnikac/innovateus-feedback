@@ -26,7 +26,21 @@ export default function ConsentPage() {
   const [alreadySubmitted, setAlreadySubmitted] = useState(false);
 
   useEffect(() => {
+    // Reset the analytics session and all submission state for a fresh visit.
+    // Without this, a second form submission in the same tab reuses the old
+    // session token and looks like the same user in the funnel.
+    sessionStorage.removeItem("analytics_session");
+    sessionStorage.removeItem("submission_id");
+    sessionStorage.removeItem("question_data");
+    sessionStorage.removeItem("question_order");
+    sessionStorage.removeItem("review_answers");
+    sessionStorage.removeItem("extraction");
+    sessionStorage.removeItem("edit_mode");
+    sessionStorage.removeItem("edit_question_id");
+
     initSession();
+    // Track both landing and consent — this page serves as the entry point.
+    trackPageView("landing", cohortId);
     trackPageView("consent", cohortId);
   }, [cohortId]);
 

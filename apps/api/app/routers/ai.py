@@ -2,9 +2,10 @@ from fastapi import APIRouter
 from app.schemas import (
     VaguenessRequest, VaguenessResponse,
     FollowUpRequest, FollowUpResponse,
+    VaguenessWithFollowupsResponse,
     CleanupRequest, CleanupResponse,
 )
-from app.services.ai_service import detect_vagueness, generate_followups, cleanup_transcript
+from app.services.ai_service import detect_vagueness, generate_followups, cleanup_transcript, detect_vagueness_with_followups
 
 router = APIRouter()
 
@@ -21,6 +22,14 @@ async def get_followups(req: FollowUpRequest):
         req.question_text, req.answer_text, req.missing_info_types
     )
     return FollowUpResponse(followups=followups)
+
+
+@router.post("/ai/check", response_model=VaguenessWithFollowupsResponse)
+async def check_vagueness_with_followups(req: VaguenessRequest):
+    """Single LLM call: vagueness classification + follow-up generation together.
+    ~1.5s vs ~3s for two sequential calls."""
+    result = await detect_vagueness_with_followups(req.question_text, req.answer_text)
+    return VaguenessWithFollowupsResponse(**result)
 
 
 @router.post("/ai/cleanup", response_model=CleanupResponse)

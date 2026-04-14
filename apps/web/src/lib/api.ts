@@ -166,6 +166,16 @@ export const api = {
       }),
     }),
 
+  // Combined single round-trip: vagueness check + followup generation
+  checkWithFollowups: (questionText: string, answerText: string) =>
+    request<VaguenessResult & FollowUpResult>("/v1/ai/check", {
+      method: "POST",
+      body: JSON.stringify({
+        question_text: questionText,
+        answer_text: answerText,
+      }),
+    }),
+
   getFollowups: (
     questionText: string,
     answerText: string,

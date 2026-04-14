@@ -104,13 +104,10 @@ async def _get_submissions_for_filters(
     # Filter out empty in-progress submissions
     filtered = []
     for sub in subs:
-        if sub.status == "started":
-            answers_q = await db.execute(select(Answer).where(Answer.submission_id == sub.id))
-            if not answers_q.scalars().all():
-                continue
-
         answers_q = await db.execute(select(Answer).where(Answer.submission_id == sub.id))
         answers = answers_q.scalars().all()
+        if sub.status == "started" and not answers:
+            continue
         ext_q = await db.execute(select(Extraction).where(Extraction.submission_id == sub.id))
         extraction = ext_q.scalar_one_or_none()
         filtered.append(_sub_to_dict(sub, answers, extraction))
@@ -172,10 +169,10 @@ async def create_cohort(req: CreateCohortRequest, db: AsyncSession = Depends(get
         survey_config=empty_config,
         active_version="v1",
         max_submissions_per_ip=1,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.utcnow(),
     )
     db.add(cohort)
-    await db.flush()
+    await db.commit()
 
     return CohortResponse(
         id=cohort_id,
@@ -223,7 +220,7 @@ async def get_metrics(
     open_answers = []
     for sub in submissions:
         for a in sub.get("answers", []):
-            if a.get("question_type") == "open":
+            if a.get("question_type") == "open" and a.get("answer_raw", "").strip():
                 open_answers.append(a)
     vague_count = sum(1 for a in open_answers if a.get("is_vague") is True)
     vagueness_rate = vague_count / len(open_answers) if open_answers else None
@@ -259,6 +256,8 @@ async def get_responses(
     items = []
     for sub in page_items:
         ext = sub.get("extraction")
+        # Only return answers that have actual content — skip blank/skipped ones
+        answered = [a for a in sub.get("answers", []) if a.get("answer_raw", "").strip()]
         items.append(
             SubmissionSummary(
                 id=uuid.UUID(sub["submission_id"]),
@@ -269,12 +268,23 @@ async def get_responses(
                 time_to_complete_sec=sub.get("time_to_complete_sec"),
                 survey_version=sub.get("survey_version"),
                 ip_hash=sub.get("ip_hash"),
-                answers=sub.get("answers", []),
+                answers=answered,
                 extraction=ext,
             )
         )
 
     return PaginatedResponses(items=items, total=total, page=page, page_size=page_size)
+
+
+async def _get_cohort_meta(db: AsyncSession, cohort_id: Optional[uuid.UUID]) -> tuple[str, str]:
+    """Return (cohort_name, course_name) for export headers."""
+    if not cohort_id:
+        return ("", "")
+    result = await db.execute(select(Cohort).where(Cohort.id == cohort_id))
+    cohort = result.scalar_one_or_none()
+    if not cohort:
+        return ("", "")
+    return (cohort.name or "", cohort.course_name or "")
 
 
 @router.get("/export/raw.csv", dependencies=[Depends(require_admin)])
@@ -287,7 +297,8 @@ async def export_raw_csv(
     submissions = await _get_submissions_for_filters(db, cohort_id, start, end)
     completed = [s for s in submissions if s.get("status") == "completed"]
     completed.sort(key=lambda x: x.get("created_at", ""))
-    csv_data = generate_raw_csv(completed, cohort_id)
+    cohort_name, course_name = await _get_cohort_meta(db, cohort_id)
+    csv_data = generate_raw_csv(completed, cohort_name, course_name)
     return StreamingResponse(
         iter([csv_data]),
         media_type="text/csv",
@@ -305,7 +316,8 @@ async def export_structured_csv(
     submissions = await _get_submissions_for_filters(db, cohort_id, start, end)
     completed = [s for s in submissions if s.get("status") == "completed"]
     completed.sort(key=lambda x: x.get("created_at", ""))
-    csv_data = generate_structured_csv(completed, cohort_id)
+    cohort_name, course_name = await _get_cohort_meta(db, cohort_id)
+    csv_data = generate_structured_csv(completed, cohort_name, course_name)
     return StreamingResponse(
         iter([csv_data]),
         media_type="text/csv",
@@ -322,7 +334,8 @@ async def export_summary_pdf(
 ):
     submissions = await _get_submissions_for_filters(db, cohort_id, start, end)
     completed = [s for s in submissions if s.get("status") == "completed"]
-    pdf_bytes = generate_summary_pdf(completed, cohort_id)
+    cohort_name, course_name = await _get_cohort_meta(db, cohort_id)
+    pdf_bytes = generate_summary_pdf(completed, cohort_name, course_name)
     return StreamingResponse(
         iter([pdf_bytes]),
         media_type="application/pdf",
@@ -339,7 +352,8 @@ async def export_summary_pptx(
 ):
     submissions = await _get_submissions_for_filters(db, cohort_id, start, end)
     completed = [s for s in submissions if s.get("status") == "completed"]
-    pptx_bytes = generate_summary_pptx(completed, cohort_id)
+    cohort_name, course_name = await _get_cohort_meta(db, cohort_id)
+    pptx_bytes = generate_summary_pptx(completed, cohort_name, course_name)
     return StreamingResponse(
         iter([pptx_bytes]),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -355,16 +369,21 @@ async def delete_all_responses(cohort_id: Optional[uuid.UUID] = None, db: AsyncS
         subs_q = await db.execute(select(Submission))
 
     subs = subs_q.scalars().all()
-    if not subs:
-        return {"status": "ok", "deleted": 0}
-
     sub_ids = [s.id for s in subs]
-    await db.execute(delete(Extraction).where(Extraction.submission_id.in_(sub_ids)))
-    await db.execute(delete(Answer).where(Answer.submission_id.in_(sub_ids)))
-    for sub in subs:
-        await db.delete(sub)
 
-    await db.flush()
+    if sub_ids:
+        await db.execute(delete(Extraction).where(Extraction.submission_id.in_(sub_ids)))
+        await db.execute(delete(Answer).where(Answer.submission_id.in_(sub_ids)))
+        for sub in subs:
+            await db.delete(sub)
+
+    # Also delete all events for this cohort (landing, consent, survey_start, etc.)
+    if cohort_id:
+        await db.execute(delete(Event).where(Event.cohort_id == str(cohort_id)))
+    else:
+        await db.execute(delete(Event))
+
+    await db.commit()
     return {"status": "ok", "deleted": len(subs)}
 
 
@@ -376,7 +395,7 @@ async def update_cohort_settings(cohort_id: uuid.UUID, req: CohortSettingsReques
         raise HTTPException(status_code=404, detail="Cohort not found")
 
     cohort.max_submissions_per_ip = req.max_submissions_per_ip
-    await db.flush()
+    await db.commit()
     return {"status": "updated", "max_submissions_per_ip": req.max_submissions_per_ip}
 
 
@@ -479,31 +498,48 @@ async def get_analytics(
         by_type.setdefault(t, []).append(evt)
 
     def count_unique_page_views(page: str) -> int:
-        sessions = set()
+        # Count unique session tokens per page.  Sessions are reset on every new
+        # form visit (frontend clears sessionStorage on the consent page), so
+        # each visit produces a distinct token — making this count accurate.
+        sessions: set[str] = set()
         for evt in by_type.get("page_view", []):
             if evt.get("event_data", {}).get("page") == page:
-                sessions.add(evt.get("session_token", ""))
+                token = evt.get("session_token", "")
+                if token:
+                    sessions.add(token)
         return len(sessions)
 
     funnel = {
         "page_views_landing": count_unique_page_views("landing"),
         "page_views_consent": count_unique_page_views("consent"),
-        "survey_starts": len(by_type.get("survey_start", [])),
-        "survey_in_progress": len([s for s in submissions if len(s.get("answers", [])) > 0]),
+        "survey_starts": len(set(e.get("session_token", "") for e in by_type.get("survey_start", []) if e.get("session_token"))),
+        "survey_in_progress": len([s for s in submissions if s.get("status") == "started" and len(s.get("answers", [])) > 0]),
         "survey_completed": len([s for s in submissions if s.get("status") == "completed"]),
     }
     funnel["dropout_rate"] = round(
         1 - (funnel["survey_completed"] / funnel["survey_starts"]) if funnel["survey_starts"] > 0 else 0, 3
     )
 
+    # Deduplicate question_view events by (session_token, question_id) so that
+    # navigating back-and-forth or editing doesn't inflate the reached count.
     question_reached: dict[str, int] = {}
     question_answered: dict[str, int] = {}
+    seen_question_views: set[tuple[str, str]] = set()
     for evt in by_type.get("question_view", []):
         qid = evt.get("event_data", {}).get("question_id", "")
-        question_reached[qid] = question_reached.get(qid, 0) + 1
+        session = evt.get("session_token", "")
+        key = (session, qid)
+        if key not in seen_question_views:
+            seen_question_views.add(key)
+            question_reached[qid] = question_reached.get(qid, 0) + 1
+    seen_question_answers: set[tuple[str, str]] = set()
     for evt in by_type.get("question_answer", []):
         qid = evt.get("event_data", {}).get("question_id", "")
-        question_answered[qid] = question_answered.get(qid, 0) + 1
+        session = evt.get("session_token", "")
+        key = (session, qid)
+        if key not in seen_question_answers:
+            seen_question_answers.add(key)
+            question_answered[qid] = question_answered.get(qid, 0) + 1
 
     all_qids = sorted(set(list(question_reached.keys()) + list(question_answered.keys())))
     per_question_dropout = []
@@ -524,6 +560,11 @@ async def get_analytics(
     for sub in submissions:
         for a in sub.get("answers", []):
             if a.get("question_type") != "open":
+                continue
+            # Only count answers that actually have content — skipped questions
+            # have no answer_raw but may still have input_mode="voice" (the
+            # default), which would incorrectly inflate the voice count.
+            if not a.get("answer_raw", "").strip():
                 continue
             qid = a.get("question_id", "")
             if a.get("input_mode") == "voice":
@@ -553,7 +594,7 @@ async def get_analytics(
     open_answers = []
     for sub in submissions:
         for a in sub.get("answers", []):
-            if a.get("question_type") == "open":
+            if a.get("question_type") == "open" and a.get("answer_raw", "").strip():
                 open_answers.append(a)
     vague_count = sum(1 for a in open_answers if a.get("is_vague") is True)
 
@@ -596,10 +637,10 @@ async def get_analytics(
     }
 
     completed_subs = [s for s in submissions if s.get("status") == "completed"]
-    ratings = [int(s["experience_rating"]) for s in completed_subs if s.get("experience_rating") is not None]
+    ratings = [int(s["experience_rating"]) for s in completed_subs if s.get("experience_rating") is not None and 1 <= int(s["experience_rating"]) <= 5]
     rating_dist = {str(i): 0 for i in range(1, 6)}
     for r in ratings:
-        rating_dist[str(r)] = rating_dist.get(str(r), 0) + 1
+        rating_dist[str(r)] += 1
 
     experience_rating = {
         "total_ratings": len(ratings),
@@ -617,6 +658,23 @@ async def get_analytics(
         "total_question_answers": len(q_answer_events),
     }
 
+    # Aggregate themes/barriers/success stories from ALL submissions (not just current page)
+    theme_counts: dict[str, int] = {}
+    barrier_counts: dict[str, int] = {}
+    success_stories: list[str] = []
+    for sub in submissions:
+        ext = sub.get("extraction")
+        if ext:
+            for t in (ext.get("top_themes") or []):
+                theme_counts[t] = theme_counts.get(t, 0) + 1
+            for b in (ext.get("barriers") or []):
+                barrier_counts[b] = barrier_counts.get(b, 0) + 1
+            if ext.get("success_story_candidate"):
+                success_stories.append(ext["success_story_candidate"])
+
+    top_themes = sorted(theme_counts.items(), key=lambda x: x[1], reverse=True)[:8]
+    top_barriers = sorted(barrier_counts.items(), key=lambda x: x[1], reverse=True)[:8]
+
     return {
         "funnel": funnel,
         "per_question_dropout": per_question_dropout,
@@ -626,6 +684,9 @@ async def get_analytics(
         "review_edits": review_edits,
         "experience_rating": experience_rating,
         "time_metrics": time_metrics,
+        "top_themes": [{"theme": t, "count": c} for t, c in top_themes],
+        "top_barriers": [{"barrier": b, "count": c} for b, c in top_barriers],
+        "success_stories": success_stories[:6],
     }
 
 

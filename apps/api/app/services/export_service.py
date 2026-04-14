@@ -5,9 +5,7 @@ All functions receive pre-fetched submission dicts instead of a database session
 import io
 import csv
 import json
-import uuid
 from pathlib import Path
-from typing import Optional
 
 SURVEY_CONFIG_PATH = Path(__file__).resolve().parents[4] / "docs" / "survey-config" / "survey-en.json"
 
@@ -21,11 +19,6 @@ def _load_questions() -> list[tuple[str, str]]:
     """Return (question_id, question_text) pairs in survey order."""
     config = _load_default_survey()
     return [(q["id"], q["text"]) for q in config["questions"]]
-
-
-def _get_cohort_info(cohort_id: Optional[uuid.UUID]) -> tuple[str, str]:
-    """Return (course_name, survey_version) — caller should pass cohort data directly if available."""
-    return ("", "1.0")
 
 
 def _format_answer(answer_raw: str | None, question_type: str | None = None) -> str:
@@ -43,10 +36,11 @@ def _format_answer(answer_raw: str | None, question_type: str | None = None) -> 
 
 def generate_raw_csv(
     submissions: list[dict],
-    cohort_id: Optional[uuid.UUID] = None,
+    cohort_name: str = "",
+    course_name: str = "",
 ) -> str:
     questions = _load_questions()
-    course_name, default_version = _get_cohort_info(cohort_id)
+    default_version = "1.0"
 
     # Determine max followups per question
     max_followups: dict[str, int] = {qid: 0 for qid, _ in questions}
@@ -82,7 +76,7 @@ def generate_raw_csv(
     for respondent_id, sub in enumerate(submissions, 1):
         answers = {a["question_id"]: a for a in sub.get("answers", [])}
         sv = sub.get("survey_version") or default_version
-        row: list[str] = [str(respondent_id), course_name, sv]
+        row: list[str] = [str(respondent_id), cohort_name or course_name, sv]
         for qid, qtext in questions:
             a = answers.get(qid)
             row.append(qtext)
@@ -97,8 +91,9 @@ def generate_raw_csv(
                     row.extend(["", ""])
         # New analytics columns
         all_answers = list(answers.values())
-        voice_used = sum(1 for a in all_answers if a.get("input_mode") == "voice")
-        text_used = sum(1 for a in all_answers if a.get("input_mode") not in ("voice", "none") or (a.get("question_type") == "open" and a.get("input_mode") != "voice"))
+        open_answers = [a for a in all_answers if a.get("question_type") == "open"]
+        voice_used = sum(1 for a in open_answers if a.get("input_mode") == "voice")
+        text_used = sum(1 for a in open_answers if a.get("input_mode") != "voice")
         followups_received = sum(1 for a in all_answers if a.get("followups_asked", 0) > 0 or a.get("followup_1"))
         followups_answered = sum(1 for a in all_answers if a.get("followup_1_answer"))
         row.extend([
@@ -117,19 +112,17 @@ def generate_raw_csv(
 
 def generate_structured_csv(
     submissions: list[dict],
-    cohort_id: Optional[uuid.UUID] = None,
+    cohort_name: str = "",
+    course_name: str = "",
 ) -> str:
     questions = _load_questions()
-    start_question_id = questions[0][0] if questions else None
-    course_name, default_version = _get_cohort_info(cohort_id)
+    default_version = "1.0"
 
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["RespondentID", "CourseName", "SurveyVersion", "MainQuestion", "FollowUpQuestions", "Answers", "VoiceUsed", "IsVague", "FollowupsAsked", "FollowupAnswered", "ExperienceRating"])
 
-    respondent_id = 0
-
-    for sub in submissions:
+    for respondent_id, sub in enumerate(submissions, 1):
         answers = {a["question_id"]: a for a in sub.get("answers", [])}
         sv = sub.get("survey_version") or default_version
 
@@ -137,9 +130,6 @@ def generate_structured_csv(
             a = answers.get(qid)
             if not a:
                 continue
-
-            if qid == start_question_id:
-                respondent_id += 1
 
             main_answer = _format_answer(a.get("answer_raw"), a.get("question_type"))
 
@@ -163,7 +153,7 @@ def generate_structured_csv(
 
             writer.writerow([
                 respondent_id,
-                course_name,
+                cohort_name or course_name,
                 sv,
                 qtext,
                 " | ".join(followup_qs),
@@ -180,18 +170,13 @@ def generate_structured_csv(
 
 def _gather_report_data(
     submissions: list[dict],
-    cohort_id: Optional[uuid.UUID],
+    cohort_name: str = "",
+    course_name: str = "",
 ) -> dict:
-    cohort_name = ""
-    course_name = ""
     survey_version = "1.0"
 
     if submissions:
-        # Pick cohort info from the first submission's data if available
-        first = submissions[0]
-        cohort_name = first.get("cohort_name", "")
-        course_name = first.get("course_name", "")
-        survey_version = first.get("survey_version") or "1.0"
+        survey_version = submissions[0].get("survey_version") or "1.0"
 
     total = len(submissions)
     scores = []
@@ -246,7 +231,8 @@ def _gather_report_data(
 
 def generate_summary_pdf(
     submissions: list[dict],
-    cohort_id: Optional[uuid.UUID] = None,
+    cohort_name: str = "",
+    course_name: str = "",
 ) -> bytes:
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -254,7 +240,7 @@ def generate_summary_pdf(
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
     from reportlab.lib.units import inch
 
-    data = _gather_report_data(submissions, cohort_id)
+    data = _gather_report_data(submissions, cohort_name, course_name)
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.75 * inch, bottomMargin=0.75 * inch)
@@ -323,13 +309,14 @@ def generate_summary_pdf(
 
 def generate_summary_pptx(
     submissions: list[dict],
-    cohort_id: Optional[uuid.UUID] = None,
+    cohort_name: str = "",
+    course_name: str = "",
 ) -> bytes:
     from pptx import Presentation
     from pptx.util import Inches, Pt
     from pptx.dml.color import RGBColor
 
-    data = _gather_report_data(submissions, cohort_id)
+    data = _gather_report_data(submissions, cohort_name, course_name)
 
     prs = Presentation()
     prs.slide_width = Inches(13.333)
@@ -396,7 +383,7 @@ def generate_summary_pptx(
 def generate_user_testing_csv(
     submissions: list[dict],
     events: list[dict],
-    cohort_id: Optional[uuid.UUID] = None,
+    cohort_id=None,
 ) -> str:
     """Generate a CSV focused on user testing metrics with one row per submission."""
     output = io.StringIO()

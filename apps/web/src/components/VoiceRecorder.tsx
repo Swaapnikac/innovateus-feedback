@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Mic, Square, Check, Loader2, Volume2, RotateCcw, Sparkles } from "lucide-react";
+import { Mic, Square, Check, CheckCircle2, Loader2, Volume2, RotateCcw, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface VoiceRecorderProps {
@@ -32,6 +32,7 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", on
   const [showingOriginal, setShowingOriginal] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState("");
   const [hasRecorded, setHasRecorded] = useState(!!initialTranscript);
+  const [confirmed, setConfirmed] = useState(!!initialTranscript);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -46,6 +47,7 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", on
     setRawTranscript(raw);
     setTranscript(raw);
     setHasRecorded(true);
+    setConfirmed(false);
     setLiveTranscript("");
     setWasEnhanced(false);
     setShowingOriginal(false);
@@ -217,6 +219,7 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", on
   };
 
   const handleDone = () => {
+    setConfirmed(true);
     onTranscriptComplete(transcript);
   };
 
@@ -310,7 +313,10 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", on
           </div>
           <Textarea
             value={transcript}
-            onChange={(e) => setTranscript(e.target.value.slice(0, 5000))}
+            onChange={(e) => {
+              setTranscript(e.target.value.slice(0, 5000));
+              setConfirmed(false);
+            }}
             className="min-h-[100px] resize-y text-base"
             disabled={isBusy}
             maxLength={5000}
@@ -332,10 +338,17 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", on
             onClick={handleDone}
             disabled={!transcript.trim() || isBusy}
             size="lg"
-            className="gap-2 bg-brand-teal hover:bg-brand-teal/90"
+            variant={confirmed ? "default" : "outline"}
+            className={confirmed
+              ? "gap-2 bg-brand-teal hover:bg-brand-teal/90 border-brand-teal text-white"
+              : "gap-2 border-brand-teal/40 text-brand-teal/70 hover:bg-brand-teal/5 hover:border-brand-teal hover:text-brand-teal"
+            }
           >
-            <Check className="h-5 w-5" />
-            Use This Response
+            {confirmed ? (
+              <><CheckCircle2 className="h-5 w-5" /> Response Confirmed</>
+            ) : (
+              <><Check className="h-5 w-5" /> Use This Response</>
+            )}
           </Button>
         </div>
       )}

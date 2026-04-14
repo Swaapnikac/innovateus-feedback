@@ -231,26 +231,10 @@ export default function DashboardPage() {
     setLinkCopied(false);
   };
 
-  const allThemes: Record<string, number> = {};
-  const allBarriers: Record<string, number> = {};
-  const successStories: string[] = [];
-
-  responses?.items.forEach((item) => {
-    if (item.extraction) {
-      item.extraction.top_themes?.forEach((t) => {
-        allThemes[t] = (allThemes[t] || 0) + 1;
-      });
-      item.extraction.barriers?.forEach((b) => {
-        allBarriers[b] = (allBarriers[b] || 0) + 1;
-      });
-      if (item.extraction.success_story_candidate) {
-        successStories.push(item.extraction.success_story_candidate);
-      }
-    }
-  });
-
-  const topThemes = Object.entries(allThemes).sort((a, b) => b[1] - a[1]).slice(0, 6);
-  const topBarriers = Object.entries(allBarriers).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  // Use analytics data (aggregated across ALL submissions, not just current page)
+  const topThemes: [string, number][] = (analytics?.top_themes ?? []).map((t: { theme: string; count: number }) => [t.theme, t.count]);
+  const topBarriers: [string, number][] = (analytics?.top_barriers ?? []).map((b: { barrier: string; count: number }) => [b.barrier, b.count]);
+  const successStories: string[] = analytics?.success_stories ?? [];
 
   if (loading) {
     return (

@@ -163,7 +163,7 @@ async def save_editor_survey(cohort_id: uuid.UUID, req: SaveSurveyRequest, db: A
 
     change_summary = _compute_change_summary(cohort.survey_config, new_config)
     version_label = await _next_version_label(db, cohort_id)
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
 
     version = SurveyConfigVersion(
         id=uuid.uuid4(),
@@ -272,7 +272,7 @@ async def restore_version(cohort_id: uuid.UUID, version_label: str, db: AsyncSes
         raise HTTPException(status_code=404, detail="Version not found")
 
     new_label = await _next_version_label(db, cohort_id)
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
 
     new_version = SurveyConfigVersion(
         id=uuid.uuid4(),

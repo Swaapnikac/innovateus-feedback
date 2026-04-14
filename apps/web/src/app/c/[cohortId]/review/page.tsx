@@ -52,11 +52,23 @@ export default function ReviewPage() {
       try { setAnswers(JSON.parse(savedAnswers)); } catch {}
     }
 
-    // Load questions
-    api.getSurvey(cohortId).then((data) => {
-      setQuestions(data.survey.questions);
-      setLoading(false);
-    });
+    // Load questions from stored data (preserves the original randomized order).
+    // Never call the API again — it re-randomizes on every request.
+    const storedData = sessionStorage.getItem("question_data");
+    if (storedData) {
+      try {
+        setQuestions(JSON.parse(storedData));
+        setLoading(false);
+      } catch {
+        setLoading(false);
+      }
+    } else {
+      // Fallback: first load with no stored data
+      api.getSurvey(cohortId).then((data) => {
+        setQuestions(data.survey.questions);
+        setLoading(false);
+      });
+    }
 
     initSession();
     setContext(cohortId, submissionId);
