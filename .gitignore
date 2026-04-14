@@ -57,8 +57,8 @@ npm-debug.log*
 # Office temp lock files
 ~$*
 
-# Docs folder (local only — not for repo)
-docs/
+# Docs — keep prompts and survey config, ignore Office lock/temp files
+docs/~$*
 QUICKSTART_AWS.md
 generate_arch_doc.py
 
