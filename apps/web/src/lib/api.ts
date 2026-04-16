@@ -1,30 +1,78 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// Paths we don't want to emit api_latency for (avoids feedback loops and
+// dashboard-admin noise — dashboard metrics paths include /admin/).
+const _LATENCY_IGNORE_PATTERNS = [
+  "/v1/events",
+  "/v1/admin/",
+  "/v1/submissions/",
+];
+
+async function _trackLatency(path: string, status: number, ok: boolean, durationMs: number) {
+  if (typeof window === "undefined") return;
+  for (const p of _LATENCY_IGNORE_PATTERNS) {
+    if (path.startsWith(p)) {
+      // still track submission-side calls (non-admin); filter only admin+events
+      if (p === "/v1/admin/" || p === "/v1/events") return;
+    }
+  }
+  try {
+    const mod = await import("./analytics");
+    mod.trackApiLatency(path, status, durationMs, ok);
+  } catch {
+    // ignore
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const authHeaders: Record<string, string> = {};
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("admin_token") || localStorage.getItem("editor_token");
     if (token) authHeaders["Authorization"] = `Bearer ${token}`;
   }
-  const res = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders,
-      ...options.headers,
-    },
-    credentials: "include",
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `Request failed: ${res.status}`);
+  const started = typeof performance !== "undefined" ? performance.now() : Date.now();
+  let status = 0;
+  let ok = false;
+  try {
+    const res = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+        ...options.headers,
+      },
+      credentials: "include",
+    });
+    status = res.status;
+    ok = res.ok;
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Request failed: ${res.status}`);
+    }
+    return res.json();
+  } finally {
+    const ended = typeof performance !== "undefined" ? performance.now() : Date.now();
+    void _trackLatency(path, status, ok, ended - started);
   }
-  return res.json();
 }
+
+export type QuestionType =
+  | "rating"
+  | "mcq"
+  | "multi"
+  | "open"
+  | "nps"
+  | "slider"
+  | "matrix"
+  | "ranking"
+  | "yesno"
+  | "dropdown"
+  | "short_text"
+  | "date";
 
 export interface SurveyQuestion {
   id: string;
-  type: "rating" | "mcq" | "multi" | "open";
+  type: QuestionType;
   text: string;
   description?: string;
   options?: (string | number)[];
@@ -36,6 +84,17 @@ export interface SurveyQuestion {
     value: string;
   };
   group?: string;
+  // Slider-specific
+  scale_min?: number;
+  scale_max?: number;
+  scale_step?: number;
+  // Matrix-specific — rows rated against `options` (columns)
+  rows?: string[];
+  // NPS / scale endpoint labels
+  labels?: {
+    low?: string;
+    high?: string;
+  };
 }
 
 export interface QuestionGroup {
@@ -66,6 +125,43 @@ export interface SurveyVersionDetail extends SurveyVersionSummary {
   config: Record<string, unknown>;
 }
 
+export interface AiAnswerInsight {
+  submission_id: string;
+  question_id: string;
+  question_text?: string;
+  answer_text?: string;
+  sentiment: "positive" | "neutral" | "negative" | "mixed" | string;
+  quality_score: number;
+  quality_reason?: string;
+}
+
+export interface AiTopic {
+  label: string;
+  count: number;
+  summary: string;
+}
+
+export interface AiInsights {
+  ai_available: boolean;
+  total_open_responses: number;
+  sentiment_distribution: Record<string, number>;
+  average_quality_score: number | null;
+  topics: AiTopic[];
+  answer_insights: AiAnswerInsight[];
+  summary: string;
+  recommendations: string[];
+}
+
+export interface CompareInsights {
+  ai_available: boolean;
+  summary: string;
+  wins: string[];
+  risks: string[];
+  recommendations: string[];
+  primary: { id: string; name: string; completed_count: number };
+  comparison: { id: string; name: string; completed_count: number };
+}
+
 export interface VaguenessResult {
   is_vague: boolean;
   is_irrelevant: boolean;
@@ -75,6 +171,146 @@ export interface VaguenessResult {
 
 export interface FollowUpResult {
   followups: string[];
+}
+
+export interface UserTestingAnalytics {
+  generated_at: string;
+  targets: Record<string, number>;
+  totals: {
+    total_submissions: number;
+    started: number;
+    completed: number;
+    abandoned: number;
+    in_progress: number;
+  };
+  executive: {
+    completion_rate: number;
+    voice_adoption_rate: number;
+    avg_time_to_complete_sec: number | null;
+    median_time_to_complete_sec: number | null;
+    follow_up_engagement_rate: number;
+    extraction_usefulness_rate: number;
+    qualtrics_sync_success_rate: number;
+    critical_error_count: number;
+    mode_switch_rate: number;
+  };
+  funnel: Array<{ stage: string; count: number }>;
+  voice_vs_text: {
+    avg_voice_word_count: number | null;
+    avg_text_word_count: number | null;
+    median_voice_word_count: number | null;
+    median_text_word_count: number | null;
+    voice_open_answer_count: number;
+    text_open_answer_count: number;
+    voice_vague_rate: number;
+    text_vague_rate: number;
+    mode_switch_rate: number;
+  };
+  followup_effectiveness: {
+    followups_shown_total: number;
+    followups_answered_total: number;
+    followup_engagement_rate: number;
+    initial_vague_count: number;
+    vague_after_followups_count: number;
+    post_followup_vagueness_rate: number;
+    specificity_improvement_count: number;
+    specificity_improvement_rate: number;
+    top_followup_prompts: Array<{
+      prompt: string;
+      shown: number;
+      answered: number;
+      improved: number;
+      improvement_rate: number;
+    }>;
+  };
+  survey_friction: {
+    abandonment_by_step: Array<{ question_id: string; count: number }>;
+    avg_time_to_complete_sec: number | null;
+    median_time_to_complete_sec: number | null;
+  };
+  voice_ux: {
+    started_in_voice_count: number;
+    voice_conversation_completed_count: number;
+    voice_conversation_completion_rate: number;
+    transcript_edit_rate: number;
+    mic_permission_failure_rate: number;
+    voice_duration_distribution: Array<{ bucket: string; count: number }>;
+  };
+  technical_health: {
+    browser_breakdown: Array<{ label: string; count: number }>;
+    os_breakdown: Array<{ label: string; count: number }>;
+    device_breakdown: Array<{ label: string; count: number }>;
+    browser_error_rate: Record<string, number>;
+    avg_api_latency_ms: number | null;
+    max_api_latency_ms: number | null;
+    total_timeouts: number;
+    total_api_failures: number;
+    client_error_count: number;
+    critical_error_count: number;
+    critical_error_rate: number;
+  };
+  extraction_quality: {
+    extraction_success_rate: number;
+    extractions_total: number;
+    reviews_total: number;
+    reviews_with_useful_flag: number;
+    review_coverage_rate: number;
+    extraction_usefulness_rate: number;
+    avg_accuracy_rating: number | null;
+    avg_usefulness_rating: number | null;
+  };
+  qualtrics_sync: {
+    completed_count: number;
+    attempted_count: number;
+    succeeded_count: number;
+    failed_count: number;
+    success_rate: number;
+    avg_latency_ms: number | null;
+    recent_failures: Array<{
+      submission_id: string;
+      attempts: number;
+      last_attempt_at: string | null;
+      error: string;
+    }>;
+  };
+  participant_feedback: {
+    experience_rating_count: number;
+    avg_experience_rating: number | null;
+    voice_experience_rating_count: number;
+    avg_voice_experience_rating: number | null;
+    would_use_again_yes: number;
+    would_use_again_total: number;
+    confusion_flag_count: number;
+    reported_issue_count: number;
+  };
+  facilitator_feedback: Array<{
+    cohort_id: string;
+    cohort_name: string;
+    facilitator_name: string | null;
+    launch_phase: string | null;
+    feedback_text: string | null;
+    reported_issue: boolean;
+    issue_type: string | null;
+    issue_notes: string | null;
+    received_at: string | null;
+  }>;
+  hypothesis_totals: Record<
+    "h1" | "h2" | "h3" | "h4" | "h5" | "h6",
+    { true: number; false: number; null: number }
+  >;
+}
+
+export interface FacilitatorFeedbackPayload {
+  cohort_id: string;
+  facilitator_name: string | null;
+  facilitator_email: string | null;
+  source_channel: string | null;
+  launch_phase: string | null;
+  facilitator_feedback_text: string | null;
+  facilitator_feedback_received_at?: string | null;
+  facilitator_reported_issue_flag: boolean | null;
+  facilitator_issue_type: string | null;
+  facilitator_issue_notes: string | null;
 }
 
 export interface ExtractionResult {
@@ -196,12 +432,14 @@ export const api = {
       body: JSON.stringify({ password }),
     }),
 
-  getMetrics: (params?: { cohort_id?: string; start?: string; end?: string; survey_version?: string }) => {
+  getMetrics: (params?: { cohort_id?: string; start?: string; end?: string; survey_version?: string; segment_q?: string; segment_v?: string }) => {
     const query = new URLSearchParams();
     if (params?.cohort_id) query.set("cohort_id", params.cohort_id);
     if (params?.start) query.set("start", params.start);
     if (params?.end) query.set("end", params.end);
     if (params?.survey_version) query.set("survey_version", params.survey_version);
+    if (params?.segment_q) query.set("segment_q", params.segment_q);
+    if (params?.segment_v) query.set("segment_v", params.segment_v);
     return request<{
       total_submissions: number;
       completed_submissions: number;
@@ -218,6 +456,8 @@ export const api = {
     start?: string;
     end?: string;
     survey_version?: string;
+    segment_q?: string;
+    segment_v?: string;
     page?: number;
     page_size?: number;
   }) => {
@@ -226,6 +466,8 @@ export const api = {
     if (params?.start) query.set("start", params.start);
     if (params?.end) query.set("end", params.end);
     if (params?.survey_version) query.set("survey_version", params.survey_version);
+    if (params?.segment_q) query.set("segment_q", params.segment_q);
+    if (params?.segment_v) query.set("segment_v", params.segment_v);
     if (params?.page) query.set("page", String(params.page));
     if (params?.page_size) query.set("page_size", String(params.page_size));
     return request<{
@@ -248,14 +490,14 @@ export const api = {
   },
 
   getCohorts: () =>
-    request<Array<{ id: string; name: string; course_name: string; max_submissions_per_ip: number; created_at: string }>>(
+    request<Array<{ id: string; name: string; course_name: string; program_type: string | null; max_submissions_per_ip: number; created_at: string }>>(
       "/v1/admin/cohorts"
     ),
 
-  createCohort: (name: string, courseName: string) =>
-    request<{ id: string; name: string; course_name: string; max_submissions_per_ip: number; created_at: string }>("/v1/admin/cohorts", {
+  createCohort: (name: string, programType: string) =>
+    request<{ id: string; name: string; course_name: string; program_type: string | null; max_submissions_per_ip: number; created_at: string }>("/v1/admin/cohorts", {
       method: "POST",
-      body: JSON.stringify({ name, course_name: courseName }),
+      body: JSON.stringify({ name, program_type: programType }),
     }),
 
   deleteAllResponses: (cohortId?: string) => {
@@ -264,6 +506,17 @@ export const api = {
       method: "DELETE",
     });
   },
+
+  deleteCohort: (cohortId: string) =>
+    request<{ status: string; cohort_id: string }>(`/v1/admin/cohorts/${cohortId}`, {
+      method: "DELETE",
+    }),
+
+  duplicateCohort: (cohortId: string) =>
+    request<{ id: string; name: string; course_name: string; program_type: string | null; max_submissions_per_ip: number; created_at: string }>(
+      `/v1/admin/cohorts/${cohortId}/duplicate`,
+      { method: "POST" }
+    ),
 
   updateCohortSettings: (cohortId: string, settings: { max_submissions_per_ip: number }) =>
     request<{ status: string; max_submissions_per_ip: number }>(`/v1/admin/cohorts/${cohortId}/settings`, {
@@ -278,7 +531,7 @@ export const api = {
     }),
 
   getEditorCohorts: () =>
-    request<Array<{ id: string; name: string; course_name: string; max_submissions_per_ip: number; created_at: string }>>(
+    request<Array<{ id: string; name: string; course_name: string; program_type: string | null; max_submissions_per_ip: number; created_at: string }>>(
       "/v1/admin/editor/cohorts"
     ),
 
@@ -305,11 +558,22 @@ export const api = {
       { method: "POST" }
     ),
 
-  getAnalytics: (params?: { cohort_id?: string; start?: string; end?: string }) => {
+  generateSurvey: (data: { goal_description: string; program_type?: string; question_count?: number }) =>
+    request<{ survey: { version: string; title: string; questions: SurveyQuestion[]; question_groups?: QuestionGroup[] } }>(
+      "/v1/admin/editor/generate-survey",
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      }
+    ),
+
+  getAnalytics: (params?: { cohort_id?: string; start?: string; end?: string; segment_q?: string; segment_v?: string }) => {
     const query = new URLSearchParams();
     if (params?.cohort_id) query.set("cohort_id", params.cohort_id);
     if (params?.start) query.set("start", params.start);
     if (params?.end) query.set("end", params.end);
+    if (params?.segment_q) query.set("segment_q", params.segment_q);
+    if (params?.segment_v) query.set("segment_v", params.segment_v);
     return request<{
       funnel: { page_views_landing: number; page_views_consent: number; survey_starts: number; survey_in_progress: number; survey_completed: number; dropout_rate: number };
       per_question_dropout: Array<{ question_id: string; reached: number; answered: number; dropout_count: number }>;
@@ -319,7 +583,59 @@ export const api = {
       review_edits: { total_reviews: number; reviews_with_edits: number; edit_rate: number; edits_per_question: Array<{ question_id: string; edit_count: number }> };
       experience_rating: { total_ratings: number; avg_rating: number | null; distribution: Record<string, number>; response_rate: number };
       time_metrics: { avg_total_sec: number | null; median_total_sec: number | null; total_question_answers: number };
+      per_question_stats: Array<{
+        question_id: string;
+        question_type: string;
+        question_text: string;
+        total_responses: number;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        stats: Record<string, any>;
+      }>;
+      submissions_by_date: Array<{ date: string; count: number }>;
     }>(`/v1/admin/analytics?${query}`);
+  },
+
+  getCrosstab: (params: { cohort_id: string; q1: string; q2: string; start?: string; end?: string; survey_version?: string }) => {
+    const query = new URLSearchParams();
+    query.set("cohort_id", params.cohort_id);
+    query.set("q1", params.q1);
+    query.set("q2", params.q2);
+    if (params.start) query.set("start", params.start);
+    if (params.end) query.set("end", params.end);
+    if (params.survey_version) query.set("survey_version", params.survey_version);
+    return request<{
+      q1_values: string[];
+      q2_values: string[];
+      matrix: Record<string, Record<string, number>>;
+      total: number;
+    }>(`/v1/admin/crosstab?${query}`);
+  },
+
+  getAiInsights: (params: {
+    cohort_id: string;
+    start?: string;
+    end?: string;
+    survey_version?: string;
+    segment_q?: string;
+    segment_v?: string;
+  }) => {
+    const query = new URLSearchParams();
+    query.set("cohort_id", params.cohort_id);
+    if (params.start) query.set("start", params.start);
+    if (params.end) query.set("end", params.end);
+    if (params.survey_version) query.set("survey_version", params.survey_version);
+    if (params.segment_q) query.set("segment_q", params.segment_q);
+    if (params.segment_v) query.set("segment_v", params.segment_v);
+    return request<AiInsights>(`/v1/admin/ai-insights?${query}`);
+  },
+
+  getCompareInsights: (params: { cohort_id: string; compare_cohort_id: string; start?: string; end?: string }) => {
+    const query = new URLSearchParams();
+    query.set("cohort_id", params.cohort_id);
+    query.set("compare_cohort_id", params.compare_cohort_id);
+    if (params.start) query.set("start", params.start);
+    if (params.end) query.set("end", params.end);
+    return request<CompareInsights>(`/v1/admin/compare-insights?${query}`);
   },
 
   exportUrl: (type: "raw.csv" | "structured.csv" | "summary.pdf" | "summary.pptx" | "user-testing.csv", params?: {
@@ -352,6 +668,69 @@ export const api = {
     request<{ status: string; submission_id: string; error: string | null }>(
       `/v1/admin/qualtrics/sync/${submissionId}`,
       { method: "POST" }
+    ),
+
+  getUserTestingAnalytics: (params?: { cohort_id?: string; start?: string; end?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.cohort_id) query.set("cohort_id", params.cohort_id);
+    if (params?.start) query.set("start", params.start);
+    if (params?.end) query.set("end", params.end);
+    return request<UserTestingAnalytics>(`/v1/admin/user-testing-analytics?${query}`);
+  },
+
+  listReviews: (cohortId?: string) => {
+    const query = new URLSearchParams();
+    if (cohortId) query.set("cohort_id", cohortId);
+    return request<{
+      items: Array<{
+        submission_id: string;
+        cohort_id: string;
+        reviewed_by: string;
+        reviewed_at: string | null;
+        useful_flag: boolean | null;
+        accuracy_rating: number | null;
+        usefulness_rating: number | null;
+        accuracy_notes: string | null;
+        usefulness_notes: string | null;
+      }>;
+      total: number;
+    }>(`/v1/admin/reviews?${query}`);
+  },
+
+  upsertReview: (
+    submissionId: string,
+    data: {
+      reviewed_by: string;
+      useful_flag?: boolean;
+      accuracy_rating?: number;
+      usefulness_rating?: number;
+      accuracy_notes?: string;
+      usefulness_notes?: string;
+    },
+  ) =>
+    request<{
+      submission_id: string;
+      reviewed_by: string;
+      reviewed_at: string;
+      useful_flag: boolean | null;
+      accuracy_rating: number | null;
+      usefulness_rating: number | null;
+      accuracy_notes: string | null;
+      usefulness_notes: string | null;
+    }>(`/v1/admin/reviews/${submissionId}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  getFacilitatorFeedback: (cohortId: string) =>
+    request<FacilitatorFeedbackPayload>(
+      `/v1/admin/cohorts/${cohortId}/facilitator-feedback`,
+    ),
+
+  saveFacilitatorFeedback: (cohortId: string, data: Partial<FacilitatorFeedbackPayload>) =>
+    request<FacilitatorFeedbackPayload>(
+      `/v1/admin/cohorts/${cohortId}/facilitator-feedback`,
+      { method: "POST", body: JSON.stringify(data) },
     ),
 
   syncAllQualtrics: (params?: { cohortId?: string; force?: boolean }) => {

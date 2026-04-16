@@ -106,6 +106,14 @@ def upgrade() -> None:
     op.create_index("ix_events_session_token", "events", ["session_token"])
     op.create_index("ix_events_cohort_id", "events", ["cohort_id"])
 
+    # Seed default cohort
+    op.execute(
+        "INSERT INTO cohorts (id, name, course_name, active_version, max_submissions_per_ip) "
+        "VALUES ('00000000-0000-0000-0000-000000000001', "
+        "'Using Generative AI at Work', 'Using Generative AI at Work', 'v1', 1) "
+        "ON CONFLICT (id) DO NOTHING"
+    )
+
 
 def downgrade() -> None:
     op.drop_table("events")

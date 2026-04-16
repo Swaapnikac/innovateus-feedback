@@ -134,8 +134,36 @@ innovateus-feedback/
   docs/
     prompts/              # AI prompt templates
     survey-config/        # Survey definition JSON with question groups
+    user-testing/         # Soft-launch metric map + checklist
   render.yaml             # Render deployment blueprint
 ```
+
+## User Testing & Soft Launch
+
+The April 22 soft launch is instrumented end-to-end:
+
+- **Dashboard**: `/admin/user-testing` — exec cards with S-target badges,
+  funnel, voice-vs-text, follow-up effectiveness, friction, voice UX, tech
+  health, extraction quality, Qualtrics sync, participant and facilitator
+  feedback, with cohort / date filters persisted in the URL.
+- **Exports**: three CSVs via `/admin/export/{raw,structured,user-testing}`.
+  All three are generated from the same submission bundles and compute rollups
+  with the same service.
+- **Source of truth**: `apps/api/app/services/metrics_service.py`. Every
+  metric is documented in [`docs/user-testing/metrics.md`](./docs/user-testing/metrics.md).
+- **Go / no-go checklist**: [`docs/user-testing/soft-launch-checklist.md`](./docs/user-testing/soft-launch-checklist.md)
+  maps each S-criterion to its dashboard widget and CSV column.
+
+### Run the analytics tests
+
+```bash
+cd apps/api
+python -m pytest tests/ -q
+```
+
+This exercises the metrics service (word counts, voice adoption, completion
+rate, specificity improvement) and locks the CSV schemas for `raw.csv`,
+`structured.csv`, and `user-testing.csv`.
 
 ## Key Features
 

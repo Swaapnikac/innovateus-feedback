@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { MessageCircle, SkipForward, Mic, Type, Pencil, Loader2 } from "lucide-react";
 import { VoiceRecorder } from "./VoiceRecorder";
+import { trackInputModeSwitched } from "@/lib/analytics";
 
 interface FollowUpPanelProps {
   followups: string[];
@@ -25,6 +26,8 @@ interface FollowUpPanelProps {
   checkingVagueness?: boolean;
   // When true, renders all followups with inline-editable textareas (review edit mode)
   editMode?: boolean;
+  // Parent question id — used for analytics tagging on sub-events.
+  questionId?: string;
 }
 
 export interface FollowUpPanelHandle {
@@ -40,7 +43,22 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
   initialAnswers,
   checkingVagueness = false,
   editMode = false,
+  questionId,
 }, ref) {
+  const followupQid = (index: number) =>
+    questionId ? `${questionId}_followup_${index + 1}` : `followup_${index + 1}`;
+  const switchMode = (idx: number, mode: "text" | "voice") => {
+    setInputMode((prev) => {
+      if (prev !== mode) {
+        try {
+          trackInputModeSwitched(followupQid(idx), prev, mode, "followup");
+        } catch {
+          // ignore
+        }
+      }
+      return mode;
+    });
+  };
   const initialMap: Record<number, string> = {};
   if (initialAnswers?.followup_1_answer) initialMap[0] = initialAnswers.followup_1_answer;
   if (initialAnswers?.followup_2_answer) initialMap[1] = initialAnswers.followup_2_answer;
@@ -210,10 +228,11 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
                   </p>
                 </div>
               ) : (
-                <VoiceRecorder
-                  onTranscriptComplete={(transcript) => handleEditModeTranscript(i, transcript)}
-                  initialTranscript={answers[i] || ""}
-                />
+              <VoiceRecorder
+                onTranscriptComplete={(transcript) => handleEditModeTranscript(i, transcript)}
+                initialTranscript={answers[i] || ""}
+                questionId={followupQid(i)}
+              />
               )}
             </div>
           );
@@ -280,7 +299,7 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
                 type="button"
                 variant={inputMode === "text" ? "default" : "ghost"}
                 size="sm"
-                onClick={() => setInputMode("text")}
+                onClick={() => switchMode(i, "text")}
                 className="gap-1.5 !rounded-md text-xs"
               >
                 <Type className="h-3.5 w-3.5" />
@@ -290,7 +309,7 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
                 type="button"
                 variant={inputMode === "voice" ? "default" : "ghost"}
                 size="sm"
-                onClick={() => setInputMode("voice")}
+                onClick={() => switchMode(i, "voice")}
                 className="gap-1.5 !rounded-md text-xs"
               >
                 <Mic className="h-3.5 w-3.5" />
@@ -317,6 +336,7 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
               <VoiceRecorder
                 onTranscriptComplete={handleTranscriptComplete}
                 initialTranscript={answers[i] || ""}
+                questionId={followupQid(i)}
               />
             )}
 

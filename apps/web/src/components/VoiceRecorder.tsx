@@ -5,11 +5,19 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Mic, Square, Check, CheckCircle2, Loader2, Volume2, RotateCcw, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
+import {
+  trackAudioCaptureError,
+  trackMicPermission,
+  trackTranscriptEdited,
+  trackVoiceRecordingStarted,
+  trackVoiceRecordingStopped,
+} from "@/lib/analytics";
 
 interface VoiceRecorderProps {
   onTranscriptComplete: (transcript: string) => void;
   initialTranscript?: string;
   onRecordingStarted?: () => void;
+  questionId?: string;
 }
 
 interface SpeechRecognitionEvent {
@@ -21,7 +29,7 @@ interface SpeechRecognitionErrorEvent {
   error: string;
 }
 
-export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", onRecordingStarted }: VoiceRecorderProps) {
+export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", onRecordingStarted, questionId }: VoiceRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
@@ -42,6 +50,9 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", on
   const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const finalTranscriptRef = useRef("");
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const stopReasonRef = useRef<"user_stop" | "silence_timeout" | "error" | "unmount">("user_stop");
+  const qId = questionId || "unknown";
 
   const enhanceTranscript = useCallback(async (raw: string) => {
     if (!raw.trim()) return;
@@ -79,11 +90,13 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", on
       clearTimeout(inactivityTimerRef.current);
     }
     inactivityTimerRef.current = setTimeout(() => {
+      stopReasonRef.current = "silence_timeout";
       stopRecording();
     }, 15000);
   }, []);
 
   const stopRecording = useCallback(() => {
+    const wasRecording = isRecordingRef.current;
     isRecordingRef.current = false;
 
     if (recognitionRef.current) {
@@ -105,11 +118,39 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", on
     }
 
     setIsRecording(false);
-  }, []);
+
+    if (wasRecording && recordingStartedAtRef.current) {
+      const durationSec = (Date.now() - recordingStartedAtRef.current) / 1000;
+      try {
+        trackVoiceRecordingStopped(qId, durationSec, stopReasonRef.current);
+      } catch {
+        // ignore
+      }
+      recordingStartedAtRef.current = null;
+      stopReasonRef.current = "user_stop";
+    }
+  }, [qId]);
 
   const startRecording = async () => {
+    let stream: MediaStream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      trackMicPermission("granted");
+    } catch (err) {
+      const e = err as DOMException | Error;
+      const name = (e as DOMException).name || "MicError";
+      const message = (e as Error).message || String(e);
+      if (name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError") {
+        trackMicPermission("denied", { error_name: name });
+      } else {
+        trackMicPermission("unknown", { error_name: name });
+      }
+      trackAudioCaptureError(qId, name, message);
+      alert("Could not access microphone. Please check your browser permissions and ensure you're using HTTPS or localhost.");
+      return;
+    }
+
+    try {
       streamRef.current = stream;
 
       const mediaRecorder = new MediaRecorder(stream, {
@@ -215,15 +256,28 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", on
       mediaRecorder.start(1000);
       isRecordingRef.current = true;
       setIsRecording(true);
+      recordingStartedAtRef.current = Date.now();
+      stopReasonRef.current = "user_stop";
+      try { trackVoiceRecordingStarted(qId); } catch {}
       onRecordingStarted?.();
       resetInactivityTimer();
-    } catch {
-      alert("Could not access microphone. Please check your browser permissions and ensure you're using HTTPS or localhost.");
+    } catch (err) {
+      const e = err as Error;
+      stopReasonRef.current = "error";
+      trackAudioCaptureError(qId, "SetupError", e?.message || String(e));
+      alert("Could not start recording. Please try again or use text input.");
     }
   };
 
   const handleDone = () => {
     setConfirmed(true);
+    const source = wasEnhanced ? enhancedTranscript : rawTranscript;
+    const originalLen = (source || "").length;
+    const finalLen = (transcript || "").length;
+    if (source && source !== transcript) {
+      const edit = Math.abs(finalLen - originalLen);
+      try { trackTranscriptEdited(qId, originalLen, finalLen, edit); } catch {}
+    }
     onTranscriptComplete(transcript);
   };
 

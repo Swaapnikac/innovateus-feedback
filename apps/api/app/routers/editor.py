@@ -10,12 +10,14 @@ from app.models import Cohort, SurveyConfigVersion
 from app.schemas import (
     EditorLoginRequest,
     AdminLoginResponse,
+    GenerateSurveyRequest,
     SaveSurveyRequest,
     SurveyVersionSummary,
     SurveyVersionDetail,
 )
 from app.auth import verify_password, create_access_token, require_editor
 from app.config import get_settings
+from app.services.ai_service import generate_survey_from_goal
 
 router = APIRouter()
 
@@ -117,6 +119,7 @@ async def editor_list_cohorts(db: AsyncSession = Depends(get_db)):
             "id": str(c.id),
             "name": c.name,
             "course_name": c.course_name,
+            "program_type": c.program_type,
             "max_submissions_per_ip": c.max_submissions_per_ip or 1,
             "created_at": c.created_at.isoformat() if c.created_at else None,
         }
@@ -143,6 +146,16 @@ async def get_editor_survey(cohort_id: uuid.UUID, db: AsyncSession = Depends(get
         "survey": config,
         "active_version": cohort.active_version,
     }
+
+
+@router.post("/editor/generate-survey", dependencies=[Depends(require_editor)])
+async def generate_editor_survey(req: GenerateSurveyRequest):
+    config = await generate_survey_from_goal(
+        req.goal_description,
+        req.program_type,
+        req.question_count,
+    )
+    return {"survey": config}
 
 
 @router.put("/editor/survey/{cohort_id}", dependencies=[Depends(require_editor)])

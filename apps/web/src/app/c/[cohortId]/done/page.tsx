@@ -11,13 +11,18 @@ import { initSession, trackPageView } from "@/lib/analytics";
 export default function DonePage() {
   const params = useParams();
   const cohortId = params.cohortId as string;
-  const [extraction, setExtraction] = useState<ExtractionResult | null>(null);
+  const [extraction] = useState<ExtractionResult | null>(() => {
+    if (typeof window === "undefined") return null;
+    const stored = sessionStorage.getItem("extraction");
+    if (!stored) return null;
+    try {
+      return JSON.parse(stored);
+    } catch {
+      return null;
+    }
+  });
 
   useEffect(() => {
-    const stored = sessionStorage.getItem("extraction");
-    if (stored) {
-      try { setExtraction(JSON.parse(stored)); } catch {}
-    }
     initSession();
     trackPageView("done", cohortId);
   }, [cohortId]);

@@ -7,7 +7,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { InnovateLogo } from "@/components/InnovateLogo";
 import { ExtractionCard } from "@/components/ExtractionCard";
 import { ExperienceRating } from "@/components/ExperienceRating";
-import { PrivacyFooter } from "@/components/PrivacyFooter";
 import { Loader2, Pencil, Send, CheckCircle2 } from "lucide-react";
 import { api, type SurveyQuestion, type ExtractionResult } from "@/lib/api";
 import { initSession, trackPageView, trackEvent, setContext } from "@/lib/analytics";
@@ -24,19 +23,41 @@ interface StoredAnswer {
   voiceConfirmed?: boolean;
 }
 
+function loadStoredAnswers(): Record<string, StoredAnswer> {
+  if (typeof window === "undefined") return {};
+  const savedAnswers = sessionStorage.getItem("review_answers");
+  if (!savedAnswers) return {};
+  try {
+    return JSON.parse(savedAnswers);
+  } catch {
+    return {};
+  }
+}
+
+function loadStoredQuestions(): SurveyQuestion[] {
+  if (typeof window === "undefined") return [];
+  const storedData = sessionStorage.getItem("question_data");
+  if (!storedData) return [];
+  try {
+    return JSON.parse(storedData);
+  } catch {
+    return [];
+  }
+}
+
 export default function ReviewPage() {
   const router = useRouter();
   const params = useParams();
   const cohortId = params.cohortId as string;
 
-  const [questions, setQuestions] = useState<SurveyQuestion[]>([]);
-  const [answers, setAnswers] = useState<Record<string, StoredAnswer>>({});
+  const [questions, setQuestions] = useState<SurveyQuestion[]>(loadStoredQuestions);
+  const [answers] = useState<Record<string, StoredAnswer>>(loadStoredAnswers);
   const [extraction, setExtraction] = useState<ExtractionResult | null>(null);
   const [loadingExtraction, setLoadingExtraction] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showRating, setShowRating] = useState(false);
   const [ratingSubmitting, setRatingSubmitting] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => loadStoredQuestions().length === 0);
 
   const submissionId = typeof window !== "undefined" ? sessionStorage.getItem("submission_id") : null;
 
@@ -44,30 +65,6 @@ export default function ReviewPage() {
     if (!submissionId) {
       router.replace(`/c/${cohortId}`);
       return;
-    }
-
-    // Load answers from sessionStorage
-    const savedAnswers = sessionStorage.getItem("review_answers");
-    if (savedAnswers) {
-      try { setAnswers(JSON.parse(savedAnswers)); } catch {}
-    }
-
-    // Load questions from stored data (preserves the original randomized order).
-    // Never call the API again — it re-randomizes on every request.
-    const storedData = sessionStorage.getItem("question_data");
-    if (storedData) {
-      try {
-        setQuestions(JSON.parse(storedData));
-        setLoading(false);
-      } catch {
-        setLoading(false);
-      }
-    } else {
-      // Fallback: first load with no stored data
-      api.getSurvey(cohortId).then((data) => {
-        setQuestions(data.survey.questions);
-        setLoading(false);
-      });
     }
 
     initSession();
@@ -82,6 +79,16 @@ export default function ReviewPage() {
       setLoadingExtraction(false);
     });
   }, [cohortId, submissionId, router]);
+
+  useEffect(() => {
+    if (!submissionId || questions.length > 0) return;
+    api.getSurvey(cohortId).then((data) => {
+      setQuestions(data.survey.questions);
+      setLoading(false);
+    }).catch(() => {
+      setLoading(false);
+    });
+  }, [cohortId, submissionId, questions.length]);
 
   // Filter to visible questions (respect conditions)
   const visibleQuestions = questions.filter((q) => {
@@ -98,12 +105,37 @@ export default function ReviewPage() {
     const ans = answers[q.id];
     if (!ans) return false;
     if (q.type === "multi") return ans.multiValues.length > 0;
+    if (q.type === "matrix" || q.type === "ranking") return !!ans.value && ans.value !== "{}" && ans.value !== "[]";
     return ans.value.trim().length > 0;
   });
 
   const formatAnswer = (q: SurveyQuestion, ans: StoredAnswer): string => {
     if (q.type === "multi") {
       return ans.multiValues.join(", ");
+    }
+    if (q.type === "matrix") {
+      try {
+        const parsed = JSON.parse(ans.value);
+        return Object.entries(parsed)
+          .map(([row, col]) => `${row}: ${col}`)
+          .join(" • ");
+      } catch {
+        return ans.value;
+      }
+    }
+    if (q.type === "ranking") {
+      try {
+        const parsed = JSON.parse(ans.value);
+        if (Array.isArray(parsed)) {
+          return parsed.map((item, i) => `${i + 1}. ${item}`).join(" • ");
+        }
+      } catch {
+        // fall through
+      }
+      return ans.value;
+    }
+    if (q.type === "yesno") {
+      return ans.value === "yes" ? "Yes" : ans.value === "no" ? "No" : ans.value;
     }
     return ans.value;
   };
@@ -184,7 +216,13 @@ export default function ReviewPage() {
         <div className="space-y-3">
           {visibleQuestions.map((q, i) => {
             const ans = answers[q.id];
-            const hasAnswer = ans && (q.type === "multi" ? ans.multiValues.length > 0 : ans.value.trim().length > 0);
+            const hasAnswer = ans && (
+              q.type === "multi"
+                ? ans.multiValues.length > 0
+                : (q.type === "matrix" || q.type === "ranking")
+                  ? !!ans.value && ans.value !== "{}" && ans.value !== "[]"
+                  : ans.value.trim().length > 0
+            );
             const displayAnswer = hasAnswer ? formatAnswer(q, ans) : null;
 
             return (

@@ -10,10 +10,25 @@ import { QuestionCard } from "@/components/QuestionCard";
 import { ChoiceQuestion } from "@/components/ChoiceQuestion";
 import { MultiSelectQuestion } from "@/components/MultiSelectQuestion";
 import { OpenEndedQuestion } from "@/components/OpenEndedQuestion";
+import { NpsQuestion } from "@/components/NpsQuestion";
+import { SliderQuestion } from "@/components/SliderQuestion";
+import { MatrixQuestion } from "@/components/MatrixQuestion";
+import { RankingQuestion } from "@/components/RankingQuestion";
+import { YesNoQuestion } from "@/components/YesNoQuestion";
+import { DropdownQuestion, ShortTextQuestion, DateQuestion } from "@/components/SimpleQuestions";
 import { FollowUpPanel, type FollowUpPanelHandle } from "@/components/FollowUpPanel";
 import { PrivacyFooter } from "@/components/PrivacyFooter";
 import { api, type SurveyQuestion } from "@/lib/api";
-import { initSession, trackPageView, trackEvent, trackDropout, setContext } from "@/lib/analytics";
+import {
+  initSession,
+  sendClientEnv,
+  setContext,
+  trackDropout,
+  trackEvent,
+  trackInputModeSwitched,
+  trackPageView,
+  trackQuestionStarted,
+} from "@/lib/analytics";
 
 interface AnswerState {
   value: string;
@@ -146,6 +161,10 @@ export default function SurveyPage() {
     initSession();
     setContext(cohortId, submissionId || undefined);
     trackPageView("survey", cohortId);
+    if (submissionId) {
+      // Fire-and-forget — captures browser/OS/device for H6 compatibility.
+      void sendClientEnv(submissionId);
+    }
   }, [cohortId, submissionId, router]);
 
   const visibleQuestions = questions.filter((q) => {
@@ -189,6 +208,7 @@ export default function SurveyPage() {
       question_index: currentStep,
       question_type: currentQuestion.type,
     }, cohortId);
+    trackQuestionStarted(currentQuestion.id, currentStep, currentQuestion.type);
 
     const handleBeforeUnload = () => {
       const answeredCount = Object.keys(answers).filter((k) => {
@@ -474,6 +494,20 @@ export default function SurveyPage() {
 
     if (!currentQuestion.required) return true;
     if (currentQuestion.type === "multi") return ans.multiValues.length > 0;
+    if (currentQuestion.type === "matrix") {
+      // Matrix requires every row answered
+      try {
+        const parsed = ans.value ? JSON.parse(ans.value) : {};
+        const rowCount = currentQuestion.rows?.length ?? 0;
+        return Object.keys(parsed).length >= rowCount && rowCount > 0;
+      } catch {
+        return false;
+      }
+    }
+    if (currentQuestion.type === "ranking") {
+      // Ranking: always has a default order once rendered
+      return (currentQuestion.options?.length ?? 0) > 0;
+    }
     return ans.value.trim().length > 0;
   };
 
@@ -524,16 +558,86 @@ export default function SurveyPage() {
               />
             )}
 
+            {currentQuestion.type === "nps" && (
+              <NpsQuestion
+                value={getAnswer(currentQuestion.id).value}
+                onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
+                labels={currentQuestion.labels}
+              />
+            )}
+
+            {currentQuestion.type === "slider" && (
+              <SliderQuestion
+                value={getAnswer(currentQuestion.id).value}
+                onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
+                min={currentQuestion.scale_min}
+                max={currentQuestion.scale_max}
+                step={currentQuestion.scale_step}
+                labels={currentQuestion.labels}
+              />
+            )}
+
+            {currentQuestion.type === "matrix" && (
+              <MatrixQuestion
+                rows={currentQuestion.rows || []}
+                columns={currentQuestion.options || []}
+                value={getAnswer(currentQuestion.id).value}
+                onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
+              />
+            )}
+
+            {currentQuestion.type === "ranking" && (
+              <RankingQuestion
+                options={currentQuestion.options || []}
+                value={getAnswer(currentQuestion.id).value}
+                onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
+              />
+            )}
+
+            {currentQuestion.type === "yesno" && (
+              <YesNoQuestion
+                value={getAnswer(currentQuestion.id).value}
+                onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
+              />
+            )}
+
+            {currentQuestion.type === "dropdown" && (
+              <DropdownQuestion
+                options={currentQuestion.options || []}
+                value={getAnswer(currentQuestion.id).value}
+                onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
+              />
+            )}
+
+            {currentQuestion.type === "short_text" && (
+              <ShortTextQuestion
+                value={getAnswer(currentQuestion.id).value}
+                onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
+              />
+            )}
+
+            {currentQuestion.type === "date" && (
+              <DateQuestion
+                value={getAnswer(currentQuestion.id).value}
+                onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
+              />
+            )}
+
             {currentQuestion.type === "open" && (
               <OpenEndedQuestion
                 key={currentQuestion.id}
+                questionId={currentQuestion.id}
                 value={getAnswer(currentQuestion.id).value}
                 onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
                 voiceEligible={currentQuestion.voice_eligible}
                 initialInputMode={getAnswer(currentQuestion.id).inputMode}
-                onInputModeChange={(mode) =>
-                  updateAnswer(currentQuestion.id, { inputMode: mode, voiceConfirmed: undefined })
-                }
+                onInputModeChange={(mode) => {
+                  const prev = getAnswer(currentQuestion.id).inputMode;
+                  if (prev !== mode) {
+                    trackInputModeSwitched(currentQuestion.id, prev, mode, "main");
+                  }
+                  updateAnswer(currentQuestion.id, { inputMode: mode, voiceConfirmed: undefined });
+                }}
                 onTranscriptReady={(transcript) =>
                   updateAnswer(currentQuestion.id, { transcript, value: transcript, voiceConfirmed: true })
                 }
@@ -547,6 +651,7 @@ export default function SurveyPage() {
               <FollowUpPanel
                 key={`followup-${currentQuestion.id}`}
                 ref={followUpPanelRef}
+                questionId={currentQuestion.id}
                 followups={resolvedFollowups}
                 onAnswerSaved={handleFollowupAnswerSaved}
                 onCheckFollowupVagueness={handleCheckFollowupVagueness}

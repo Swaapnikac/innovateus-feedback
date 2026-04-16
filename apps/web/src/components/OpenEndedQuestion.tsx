@@ -14,6 +14,7 @@ interface OpenEndedQuestionProps {
   onInputModeChange?: (mode: "text" | "voice") => void;
   onTranscriptReady?: (transcript: string) => void;
   onRecordingStarted?: () => void;
+  questionId?: string;
 }
 
 export function OpenEndedQuestion({
@@ -24,6 +25,7 @@ export function OpenEndedQuestion({
   onInputModeChange,
   onTranscriptReady,
   onRecordingStarted,
+  questionId,
 }: OpenEndedQuestionProps) {
   const [inputMode, setInputMode] = useState<"text" | "voice">(
     initialInputMode ?? (voiceEligible ? "voice" : "text")
@@ -84,6 +86,7 @@ export function OpenEndedQuestion({
           onTranscriptComplete={handleTranscriptComplete}
           initialTranscript={value}
           onRecordingStarted={onRecordingStarted}
+          questionId={questionId}
         />
       )}
     </div>

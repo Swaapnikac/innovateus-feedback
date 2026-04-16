@@ -31,7 +31,8 @@ Critical rules:
 You MUST respond with a JSON object containing:
 - "is_irrelevant": boolean (true only for NON-RELEVANT)
 - "is_vague": boolean (true for VAGUE or PARTIAL BUT USEFUL, false for COMPLETE or NON-RELEVANT)
-- "reason": brief explanation of your classification
+- "vagueness_score": a number from 0.0 to 1.0 (0.0 = fully specific, 0.25 = partial but useful, 0.6 = vague, 1.0 = non-relevant/empty)
+- "reason": brief explanation of your classification (under 25 words)
 - "missing_info_types": array from ["example", "context", "outcome", "barrier", "task"] — empty if COMPLETE or NON-RELEVANT
 - "followups": array of 0 or 1 follow-up question strings (empty if COMPLETE, NON-RELEVANT, or participant seems done)
 

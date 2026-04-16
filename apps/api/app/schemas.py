@@ -14,6 +14,14 @@ class SurveyQuestion(BaseModel):
     voice_eligible: bool = False
     condition: Optional[dict] = None
     group: Optional[str] = None
+    # Slider-specific
+    scale_min: Optional[float] = None
+    scale_max: Optional[float] = None
+    scale_step: Optional[float] = None
+    # Matrix-specific — rows rated against `options` (columns)
+    rows: Optional[list[str]] = None
+    # NPS / scale endpoint labels
+    labels: Optional[dict] = None
 
 
 class QuestionGroup(BaseModel):
@@ -51,6 +59,21 @@ class AnswerRequest(BaseModel):
     followup_1_answer: Optional[str] = Field(None, max_length=5000)
     followup_2: Optional[str] = Field(None, max_length=500)
     followup_2_answer: Optional[str] = Field(None, max_length=5000)
+    # Voice/transcript detail
+    transcript_raw: Optional[str] = Field(None, max_length=5000)
+    voice_duration_sec: Optional[int] = Field(None, ge=0, le=3600)
+    followup_1_input_mode: Optional[str] = Field(None, max_length=10)
+    followup_2_input_mode: Optional[str] = Field(None, max_length=10)
+    answer_skipped: Optional[bool] = None
+
+
+class ClientEnvRequest(BaseModel):
+    user_agent: Optional[str] = Field(None, max_length=1024)
+    screen_size: Optional[str] = Field(None, max_length=32)
+    connection_type: Optional[str] = Field(None, max_length=32)
+    page_load_time_ms: Optional[int] = Field(None, ge=0, le=600000)
+    voice_supported: Optional[bool] = None
+    mic_permission_status: Optional[str] = Field(None, max_length=16)
 
 
 class AnswerResponse(BaseModel):
@@ -160,13 +183,21 @@ class CohortResponse(BaseModel):
     id: uuid.UUID
     name: str
     course_name: str
+    program_type: Optional[str] = None
     max_submissions_per_ip: int = 1
     created_at: datetime
 
 
 class CreateCohortRequest(BaseModel):
     name: str
-    course_name: str
+    course_name: str = ""
+    program_type: str
+
+
+class GenerateSurveyRequest(BaseModel):
+    goal_description: str = Field(..., min_length=10, max_length=4000)
+    program_type: Optional[str] = None
+    question_count: int = Field(8, ge=3, le=14)
 
 
 class CohortSettingsRequest(BaseModel):
@@ -224,3 +255,48 @@ class DropoutRequest(BaseModel):
 class ExperienceRatingRequest(BaseModel):
     rating: int = Field(..., ge=1, le=5)
     feedback_text: Optional[str] = Field(None, max_length=500)
+    voice_experience_rating: Optional[int] = Field(None, ge=1, le=5)
+    voice_experience_text: Optional[str] = Field(None, max_length=500)
+    would_use_again: Optional[bool] = None
+    preferred_mode_next_time: Optional[str] = Field(None, max_length=16)
+    confusion_flag: Optional[bool] = None
+    confusion_step: Optional[str] = Field(None, max_length=64)
+    reported_issue_flag: Optional[bool] = None
+    reported_issue_text: Optional[str] = Field(None, max_length=500)
+
+
+# ── Extraction review (H4) ──
+
+
+class ReviewRequest(BaseModel):
+    reviewed_by: str = Field(..., min_length=1, max_length=128)
+    useful_flag: Optional[bool] = None
+    accuracy_rating: Optional[int] = Field(None, ge=1, le=5)
+    usefulness_rating: Optional[int] = Field(None, ge=1, le=5)
+    accuracy_notes: Optional[str] = Field(None, max_length=2000)
+    usefulness_notes: Optional[str] = Field(None, max_length=2000)
+
+
+class ReviewResponse(BaseModel):
+    submission_id: uuid.UUID
+    reviewed_by: str
+    reviewed_at: datetime
+    useful_flag: Optional[bool] = None
+    accuracy_rating: Optional[int] = None
+    usefulness_rating: Optional[int] = None
+    accuracy_notes: Optional[str] = None
+    usefulness_notes: Optional[str] = None
+
+
+# ── Facilitator feedback ──
+
+
+class FacilitatorFeedbackRequest(BaseModel):
+    facilitator_name: Optional[str] = Field(None, max_length=255)
+    facilitator_email: Optional[str] = Field(None, max_length=255)
+    source_channel: Optional[str] = Field(None, max_length=64)
+    launch_phase: Optional[str] = Field(None, max_length=32)
+    facilitator_feedback_text: Optional[str] = Field(None, max_length=5000)
+    facilitator_reported_issue_flag: Optional[bool] = None
+    facilitator_issue_type: Optional[str] = Field(None, max_length=64)
+    facilitator_issue_notes: Optional[str] = Field(None, max_length=2000)

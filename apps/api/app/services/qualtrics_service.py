@@ -1,12 +1,27 @@
-"""Qualtrics integration — push completed submissions via Response Import API."""
+"""Qualtrics integration — push completed submissions via Response Import API.
+
+Also maintains submission-level sync-health fields so S8 ("Qualtrics sync
+reliability >95%") can be measured directly on the submission row without
+having to inspect Qualtrics itself:
+
+- qualtrics_sync_attempt_count
+- qualtrics_sync_first_attempt_at / qualtrics_sync_last_attempt_at
+- qualtrics_sync_last_error
+- qualtrics_sync_latency_ms
+- qualtrics_response_id
+- qualtrics_synced_at (existing)
+"""
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
 import httpx
 
 from app.config import get_settings
+
+PAYLOAD_VERSION = "v1.2024-04"
 
 logger = logging.getLogger(__name__)
 
@@ -255,15 +270,53 @@ async def sync_submission(submission_id: uuid.UUID, force: bool = False) -> dict
             course_name = cohort.course_name if cohort else ""
 
             payload = _build_payload(submission_dict, cohort_name, course_name)
+
+            # ── Track sync attempt for S8 reliability measurement ──
+            attempt_started_at = datetime.now(timezone.utc)
+            attempt_monotonic = time.monotonic()
+            sub.qualtrics_sync_attempt_count = (sub.qualtrics_sync_attempt_count or 0) + 1
+            if sub.qualtrics_sync_first_attempt_at is None:
+                sub.qualtrics_sync_first_attempt_at = attempt_started_at
+            sub.qualtrics_sync_last_attempt_at = attempt_started_at
+
             push_result = await push_to_qualtrics(payload, submission_id)
+
+            latency_ms = int((time.monotonic() - attempt_monotonic) * 1000)
+            sub.qualtrics_sync_latency_ms = latency_ms
 
             if push_result["success"]:
                 sub.qualtrics_synced_at = datetime.now(timezone.utc)
-                await db.commit()
+                sub.qualtrics_sync_last_error = None
+                if push_result.get("qualtrics_response_id"):
+                    sub.qualtrics_response_id = push_result["qualtrics_response_id"]
+            else:
+                sub.qualtrics_sync_last_error = (push_result.get("error") or "")[:1000]
+
+            await db.commit()
 
             return push_result
 
     except Exception as e:
         error_msg = f"Unexpected error: {e}"
         logger.warning("Qualtrics sync error for %s: %s", submission_id, error_msg)
+        # Try to record the failure on the submission so it shows up on the
+        # dashboard, even if the main flow crashed mid-way.
+        try:
+            from sqlalchemy import select
+            from app.db import async_session
+            from app.models import Submission
+
+            async with async_session() as db:
+                sub_result = await db.execute(select(Submission).where(Submission.id == submission_id))
+                sub = sub_result.scalar_one_or_none()
+                if sub is not None:
+                    sub.qualtrics_sync_attempt_count = (sub.qualtrics_sync_attempt_count or 0) + 1
+                    now_ts = datetime.now(timezone.utc)
+                    if sub.qualtrics_sync_first_attempt_at is None:
+                        sub.qualtrics_sync_first_attempt_at = now_ts
+                    sub.qualtrics_sync_last_attempt_at = now_ts
+                    sub.qualtrics_sync_last_error = error_msg[:1000]
+                    await db.commit()
+        except Exception:
+            pass
         return {"success": False, "error": error_msg}
