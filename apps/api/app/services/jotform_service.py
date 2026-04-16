@@ -201,7 +201,7 @@ async def sync_submission(submission_id: uuid.UUID) -> dict:
             push_result = await push_to_jotform(submission_data, submission_id)
 
             if push_result["success"]:
-                sub.jotform_synced_at = datetime.utcnow()
+                sub.jotform_synced_at = datetime.now(timezone.utc)
                 await db.commit()
 
             return push_result

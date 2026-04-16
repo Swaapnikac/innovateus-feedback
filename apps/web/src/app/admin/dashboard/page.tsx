@@ -147,7 +147,7 @@ export default function DashboardPage() {
     loadData();
   }, [loadData]);
 
-  const handleExport = async (type: "raw.csv" | "structured.csv" | "summary.pdf" | "summary.pptx") => {
+  const handleExport = async (type: "raw.csv" | "structured.csv" | "summary.pdf" | "summary.pptx" | "user-testing.csv") => {
     const exportCohortId = selectedCohort && selectedCohort !== "all" ? selectedCohort : undefined;
     const url = api.exportUrl(type, {
       cohort_id: exportCohortId,

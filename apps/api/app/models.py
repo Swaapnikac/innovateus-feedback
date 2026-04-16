@@ -1,6 +1,10 @@
 import uuid
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 from sqlalchemy import String, Text, Integer, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -29,7 +33,7 @@ class Cohort(Base):
     survey_config: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     active_version: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     max_submissions_per_ip: Mapped[int] = mapped_column(Integer, default=1)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
 
     submissions: Mapped[list["Submission"]] = relationship(back_populates="cohort")
     versions: Mapped[list["SurveyConfigVersion"]] = relationship(back_populates="cohort", order_by="SurveyConfigVersion.created_at.desc()")
@@ -40,16 +44,16 @@ class Submission(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     cohort_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("cohorts.id"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default=SubmissionStatus.started.value)
     time_to_complete_sec: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     consent_version: Mapped[str] = mapped_column(String(20), default="1.0")
     survey_version: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     ip_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     client_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    jotform_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    qualtrics_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    jotform_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    qualtrics_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     # Experience rating (added for user testing feedback)
     experience_rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     experience_feedback: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -94,7 +98,7 @@ class Extraction(Base):
     public_benefit: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     top_themes: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     success_story_candidate: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
 
     submission: Mapped["Submission"] = relationship(back_populates="extraction")
 
@@ -108,7 +112,7 @@ class SurveyConfigVersion(Base):
     config: Mapped[dict] = mapped_column(JSONB, nullable=False)
     change_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String(50), default="editor")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
 
     cohort: Mapped["Cohort"] = relationship(back_populates="versions")
 
@@ -123,4 +127,4 @@ class Event(Base):
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
     event_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     ip_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)

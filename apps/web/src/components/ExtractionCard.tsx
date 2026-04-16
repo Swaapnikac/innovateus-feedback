@@ -14,7 +14,7 @@ interface ExtractionCardProps {
 export function ExtractionCard({
   extraction,
   title = "What We Heard",
-  subtitle = "A de-identified summary of your feedback",
+  subtitle = "Here's a snapshot of the key takeaways from your responses",
 }: ExtractionCardProps) {
   return (
     <Card className="bg-white border-0 shadow-sm rounded-2xl">

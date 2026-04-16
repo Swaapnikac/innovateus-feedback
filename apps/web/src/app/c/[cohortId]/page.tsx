@@ -99,8 +99,8 @@ export default function ConsentPage() {
                 <Clock className="h-3 w-3" />
                 This takes about 2–4 minutes
               </div>
-              <h1 className="text-3xl font-serif text-brand-blue">Post-Course Feedback</h1>
-              <p className="text-brand-blue/60">Help us improve this course for future learners.</p>
+              <h1 className="text-3xl font-serif text-brand-blue">Share Your Experience</h1>
+              <p className="text-brand-blue/60">Your input helps us improve for future participants.</p>
             </div>
 
             <Card className="bg-white border-0 shadow-sm rounded-2xl">

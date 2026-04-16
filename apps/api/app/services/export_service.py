@@ -15,9 +15,9 @@ def _load_default_survey() -> dict:
         return json.load(f)
 
 
-def _load_questions() -> list[tuple[str, str]]:
+def _load_questions(survey_config: dict | None = None) -> list[tuple[str, str]]:
     """Return (question_id, question_text) pairs in survey order."""
-    config = _load_default_survey()
+    config = survey_config if survey_config else _load_default_survey()
     return [(q["id"], q["text"]) for q in config["questions"]]
 
 
@@ -38,8 +38,9 @@ def generate_raw_csv(
     submissions: list[dict],
     cohort_name: str = "",
     course_name: str = "",
+    survey_config: dict | None = None,
 ) -> str:
-    questions = _load_questions()
+    questions = _load_questions(survey_config)
     default_version = "1.0"
 
     # Determine max followups per question
@@ -114,8 +115,9 @@ def generate_structured_csv(
     submissions: list[dict],
     cohort_name: str = "",
     course_name: str = "",
+    survey_config: dict | None = None,
 ) -> str:
-    questions = _load_questions()
+    questions = _load_questions(survey_config)
     default_version = "1.0"
 
     output = io.StringIO()

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 from app.db import get_db
 from app.models import Cohort, Submission, Answer, Extraction, Event
 from app.schemas import (
@@ -101,15 +101,27 @@ async def _get_submissions_for_filters(
     result = await db.execute(q)
     subs = result.scalars().all()
 
-    # Filter out empty in-progress submissions
+    if not subs:
+        return []
+
+    sub_ids = [s.id for s in subs]
+
+    answers_result = await db.execute(select(Answer).where(Answer.submission_id.in_(sub_ids)))
+    all_answers = answers_result.scalars().all()
+    answers_by_sub: dict[uuid.UUID, list[Answer]] = {}
+    for a in all_answers:
+        answers_by_sub.setdefault(a.submission_id, []).append(a)
+
+    ext_result = await db.execute(select(Extraction).where(Extraction.submission_id.in_(sub_ids)))
+    all_extractions = ext_result.scalars().all()
+    ext_by_sub: dict[uuid.UUID, Extraction] = {e.submission_id: e for e in all_extractions}
+
     filtered = []
     for sub in subs:
-        answers_q = await db.execute(select(Answer).where(Answer.submission_id == sub.id))
-        answers = answers_q.scalars().all()
+        answers = answers_by_sub.get(sub.id, [])
         if sub.status == "started" and not answers:
             continue
-        ext_q = await db.execute(select(Extraction).where(Extraction.submission_id == sub.id))
-        extraction = ext_q.scalar_one_or_none()
+        extraction = ext_by_sub.get(sub.id)
         filtered.append(_sub_to_dict(sub, answers, extraction))
 
     return filtered
@@ -169,10 +181,9 @@ async def create_cohort(req: CreateCohortRequest, db: AsyncSession = Depends(get
         survey_config=empty_config,
         active_version="v1",
         max_submissions_per_ip=1,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
     db.add(cohort)
-    await db.commit()
 
     return CohortResponse(
         id=cohort_id,
@@ -220,7 +231,7 @@ async def get_metrics(
     open_answers = []
     for sub in submissions:
         for a in sub.get("answers", []):
-            if a.get("question_type") == "open" and a.get("answer_raw", "").strip():
+            if a.get("question_type") == "open" and (a.get("answer_raw") or "").strip():
                 open_answers.append(a)
     vague_count = sum(1 for a in open_answers if a.get("is_vague") is True)
     vagueness_rate = vague_count / len(open_answers) if open_answers else None
@@ -246,45 +257,74 @@ async def get_responses(
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    submissions = await _get_submissions_for_filters(db, cohort_id, start, end, survey_version)
-    submissions.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    base_q = select(Submission)
+    if cohort_id:
+        base_q = base_q.where(Submission.cohort_id == cohort_id)
+    if start:
+        base_q = base_q.where(Submission.created_at >= start)
+    if end:
+        base_q = base_q.where(Submission.created_at <= end)
+    if survey_version:
+        base_q = base_q.where(Submission.survey_version == survey_version)
 
-    total = len(submissions)
-    start_idx = (page - 1) * page_size
-    page_items = submissions[start_idx:start_idx + page_size]
+    count_result = await db.execute(select(func.count()).select_from(base_q.subquery()))
+    total = count_result.scalar() or 0
+
+    offset = (page - 1) * page_size
+    paged_q = base_q.order_by(Submission.created_at.desc()).offset(offset).limit(page_size)
+    result = await db.execute(paged_q)
+    subs = result.scalars().all()
+
+    if not subs:
+        return PaginatedResponses(items=[], total=total, page=page, page_size=page_size)
+
+    sub_ids = [s.id for s in subs]
+
+    answers_result = await db.execute(select(Answer).where(Answer.submission_id.in_(sub_ids)))
+    all_answers = answers_result.scalars().all()
+    answers_by_sub: dict[uuid.UUID, list[Answer]] = {}
+    for a in all_answers:
+        answers_by_sub.setdefault(a.submission_id, []).append(a)
+
+    ext_result = await db.execute(select(Extraction).where(Extraction.submission_id.in_(sub_ids)))
+    all_extractions = ext_result.scalars().all()
+    ext_by_sub = {e.submission_id: e for e in all_extractions}
 
     items = []
-    for sub in page_items:
-        ext = sub.get("extraction")
-        # Only return answers that have actual content — skip blank/skipped ones
-        answered = [a for a in sub.get("answers", []) if a.get("answer_raw", "").strip()]
+    for sub in subs:
+        answers = answers_by_sub.get(sub.id, [])
+        if sub.status == "started" and not answers:
+            continue
+        extraction = ext_by_sub.get(sub.id)
+        sub_dict = _sub_to_dict(sub, answers, extraction)
+        answered = [a for a in sub_dict.get("answers", []) if (a.get("answer_raw") or "").strip()]
         items.append(
             SubmissionSummary(
-                id=uuid.UUID(sub["submission_id"]),
-                cohort_id=uuid.UUID(sub["cohort_id"]),
-                created_at=datetime.fromisoformat(sub["created_at"]) if sub.get("created_at") else datetime.now(),
-                completed_at=datetime.fromisoformat(sub["completed_at"]) if sub.get("completed_at") else None,
-                status=sub["status"],
-                time_to_complete_sec=sub.get("time_to_complete_sec"),
-                survey_version=sub.get("survey_version"),
-                ip_hash=sub.get("ip_hash"),
+                id=sub.id,
+                cohort_id=sub.cohort_id,
+                created_at=sub.created_at or datetime.now(),
+                completed_at=sub.completed_at,
+                status=sub.status,
+                time_to_complete_sec=sub.time_to_complete_sec,
+                survey_version=sub.survey_version,
+                ip_hash=sub.ip_hash,
                 answers=answered,
-                extraction=ext,
+                extraction=sub_dict.get("extraction"),
             )
         )
 
     return PaginatedResponses(items=items, total=total, page=page, page_size=page_size)
 
 
-async def _get_cohort_meta(db: AsyncSession, cohort_id: Optional[uuid.UUID]) -> tuple[str, str]:
-    """Return (cohort_name, course_name) for export headers."""
+async def _get_cohort_meta(db: AsyncSession, cohort_id: Optional[uuid.UUID]) -> tuple[str, str, Optional[dict]]:
+    """Return (cohort_name, course_name, survey_config) for export headers."""
     if not cohort_id:
-        return ("", "")
+        return ("", "", None)
     result = await db.execute(select(Cohort).where(Cohort.id == cohort_id))
     cohort = result.scalar_one_or_none()
     if not cohort:
-        return ("", "")
-    return (cohort.name or "", cohort.course_name or "")
+        return ("", "", None)
+    return (cohort.name or "", cohort.course_name or "", cohort.survey_config)
 
 
 @router.get("/export/raw.csv", dependencies=[Depends(require_admin)])
@@ -297,8 +337,8 @@ async def export_raw_csv(
     submissions = await _get_submissions_for_filters(db, cohort_id, start, end)
     completed = [s for s in submissions if s.get("status") == "completed"]
     completed.sort(key=lambda x: x.get("created_at", ""))
-    cohort_name, course_name = await _get_cohort_meta(db, cohort_id)
-    csv_data = generate_raw_csv(completed, cohort_name, course_name)
+    cohort_name, course_name, survey_config = await _get_cohort_meta(db, cohort_id)
+    csv_data = generate_raw_csv(completed, cohort_name, course_name, survey_config=survey_config)
     return StreamingResponse(
         iter([csv_data]),
         media_type="text/csv",
@@ -316,8 +356,8 @@ async def export_structured_csv(
     submissions = await _get_submissions_for_filters(db, cohort_id, start, end)
     completed = [s for s in submissions if s.get("status") == "completed"]
     completed.sort(key=lambda x: x.get("created_at", ""))
-    cohort_name, course_name = await _get_cohort_meta(db, cohort_id)
-    csv_data = generate_structured_csv(completed, cohort_name, course_name)
+    cohort_name, course_name, survey_config = await _get_cohort_meta(db, cohort_id)
+    csv_data = generate_structured_csv(completed, cohort_name, course_name, survey_config=survey_config)
     return StreamingResponse(
         iter([csv_data]),
         media_type="text/csv",
@@ -334,7 +374,7 @@ async def export_summary_pdf(
 ):
     submissions = await _get_submissions_for_filters(db, cohort_id, start, end)
     completed = [s for s in submissions if s.get("status") == "completed"]
-    cohort_name, course_name = await _get_cohort_meta(db, cohort_id)
+    cohort_name, course_name, _survey_config = await _get_cohort_meta(db, cohort_id)
     pdf_bytes = generate_summary_pdf(completed, cohort_name, course_name)
     return StreamingResponse(
         iter([pdf_bytes]),
@@ -352,7 +392,7 @@ async def export_summary_pptx(
 ):
     submissions = await _get_submissions_for_filters(db, cohort_id, start, end)
     completed = [s for s in submissions if s.get("status") == "completed"]
-    cohort_name, course_name = await _get_cohort_meta(db, cohort_id)
+    cohort_name, course_name, _survey_config = await _get_cohort_meta(db, cohort_id)
     pptx_bytes = generate_summary_pptx(completed, cohort_name, course_name)
     return StreamingResponse(
         iter([pptx_bytes]),
@@ -383,7 +423,6 @@ async def delete_all_responses(cohort_id: Optional[uuid.UUID] = None, db: AsyncS
     else:
         await db.execute(delete(Event))
 
-    await db.commit()
     return {"status": "ok", "deleted": len(subs)}
 
 
@@ -395,7 +434,6 @@ async def update_cohort_settings(cohort_id: uuid.UUID, req: CohortSettingsReques
         raise HTTPException(status_code=404, detail="Cohort not found")
 
     cohort.max_submissions_per_ip = req.max_submissions_per_ip
-    await db.commit()
     return {"status": "updated", "max_submissions_per_ip": req.max_submissions_per_ip}
 
 
@@ -564,7 +602,7 @@ async def get_analytics(
             # Only count answers that actually have content — skipped questions
             # have no answer_raw but may still have input_mode="voice" (the
             # default), which would incorrectly inflate the voice count.
-            if not a.get("answer_raw", "").strip():
+            if not (a.get("answer_raw") or "").strip():
                 continue
             qid = a.get("question_id", "")
             if a.get("input_mode") == "voice":
@@ -594,7 +632,7 @@ async def get_analytics(
     open_answers = []
     for sub in submissions:
         for a in sub.get("answers", []):
-            if a.get("question_type") == "open" and a.get("answer_raw", "").strip():
+            if a.get("question_type") == "open" and (a.get("answer_raw") or "").strip():
                 open_answers.append(a)
     vague_count = sum(1 for a in open_answers if a.get("is_vague") is True)
 
@@ -611,8 +649,8 @@ async def get_analytics(
     text_vague = sum(1 for a in open_answers if a.get("input_mode") != "voice" and a.get("is_vague"))
     text_total = sum(1 for a in open_answers if a.get("input_mode") != "voice")
 
-    voice_lengths = [len(a.get("answer_raw", "")) for a in open_answers if a.get("input_mode") == "voice" and a.get("answer_raw")]
-    text_lengths = [len(a.get("answer_raw", "")) for a in open_answers if a.get("input_mode") != "voice" and a.get("answer_raw")]
+    voice_lengths = [len(a["answer_raw"]) for a in open_answers if a.get("input_mode") == "voice" and a.get("answer_raw")]
+    text_lengths = [len(a["answer_raw"]) for a in open_answers if a.get("input_mode") != "voice" and a.get("answer_raw")]
 
     voice_vs_text_quality = {
         "voice_vague_rate": round(voice_vague / voice_total, 3) if voice_total > 0 else 0,

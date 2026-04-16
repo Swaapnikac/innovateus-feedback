@@ -65,11 +65,9 @@ export default function SurveyPage() {
       // Restore answers from sessionStorage
       let restoredAnswers: Record<string, AnswerState> = {};
       const savedAnswers = sessionStorage.getItem("review_answers");
-      console.log("[EDIT] review_answers raw:", savedAnswers);
       if (savedAnswers) {
         try {
           restoredAnswers = JSON.parse(savedAnswers);
-          console.log("[EDIT] restoredAnswers for", editQuestionId, ":", JSON.stringify(restoredAnswers[editQuestionId]));
           setAnswers(restoredAnswers);
           answersRef.current = restoredAnswers;
         } catch {}
@@ -163,16 +161,14 @@ export default function SurveyPage() {
   const currentQuestion = visibleQuestions[currentStep];
 
   // When navigating to a question, restore follow-up panel if that question
-  // had follow-ups generated but not yet completed (e.g. user went Back).
+  // had follow-ups generated (e.g. user went Back, or is editing from review).
   // Uses answersRef so it always reads the latest answer state, not a stale closure.
   useEffect(() => {
     if (!currentQuestion) return;
     const defaultAns: AnswerState = { value: "", multiValues: [], inputMode: "voice" };
     const ans = answersRef.current[currentQuestion.id] ?? defaultAns;
-    console.log("[FOLLOWUP-EFFECT] qId:", currentQuestion.id, "isVague:", ans.isVague, "followups:", ans.followups, "followupAnswers:", ans.followupAnswers);
     if (
       currentQuestion.type === "open" &&
-      ans.isVague === true &&
       ans.followups &&
       ans.followups.length > 0
     ) {
@@ -222,12 +218,15 @@ export default function SurveyPage() {
       const existing = prev[qId] || defaultAnswer;
       // If the answer text changed, wipe vagueness/followup state so the next
       // Next click re-runs the check against the new text.
+      // In edit-return mode, preserve followup data — the user is editing within
+      // an existing conversation thread (e.g. fixing a typo) and followups should
+      // stay visible. Vagueness will be re-checked on "Back to Review" if needed.
       const textChanged = update.value !== undefined && update.value !== existing.value;
-      if (textChanged) {
+      if (textChanged && !editReturnMode) {
         setShowFollowups(false);
         pendingFollowupsRef.current = null;
       }
-      const reset = textChanged ? { isVague: undefined, followups: undefined, followupAnswers: undefined, missingInfoTypes: undefined } : {};
+      const reset = (textChanged && !editReturnMode) ? { isVague: undefined, followups: undefined, followupAnswers: undefined, missingInfoTypes: undefined } : {};
       const next = { ...prev, [qId]: { ...existing, ...reset, ...update } };
       answersRef.current = next;
       return next;
@@ -286,7 +285,6 @@ export default function SurveyPage() {
       if (currentQuestion && overrides) {
         updatedAnswers[currentQuestion.id] = { ...(updatedAnswers[currentQuestion.id] || defaultAnswer), ...overrides };
       }
-      console.log("[ADVANCE-EDIT] writing review_answers for", currentQuestion?.id, ":", JSON.stringify(updatedAnswers[currentQuestion?.id || ""]));
       sessionStorage.setItem("review_answers", JSON.stringify(updatedAnswers));
       setEditReturnMode(false);
       router.push(`/c/${cohortId}/review`);
@@ -335,7 +333,7 @@ export default function SurveyPage() {
         const result = await api.checkWithFollowups(currentQuestion.text, ans.value);
 
         if (result.is_irrelevant) {
-          setIrrelevantError("Your answer doesn't seem related to this question. Please try again or skip to the next question.");
+          setIrrelevantError("Your response does not seem to answer the question being asked. Please provide a relevant answer so we can continue.");
           updateAnswer(currentQuestion.id, { isVague: undefined });
           setCheckingVagueness(false);
           return;
@@ -385,7 +383,6 @@ export default function SurveyPage() {
     const ans = { ...currentAns, followupAnswers };
     updateAnswer(currentQuestion.id, { followupAnswers });
 
-    console.log("[FOLLOWUP-SAVED] followupAnswers:", followupAnswers, "ans:", JSON.stringify(ans));
     // Always persist to sessionStorage immediately — don't wait for advanceToNext.
     // Read the current review_answers if it exists, merge in the updated answer.
     // This ensures the data survives even if advanceToNext has a stale closure.
@@ -560,6 +557,7 @@ export default function SurveyPage() {
                 }}
                 initialAnswers={getAnswer(currentQuestion.id).followupAnswers}
                 checkingVagueness={checkingFollowupVagueness}
+                editMode={editReturnMode}
               />
             )}
           </QuestionCard>

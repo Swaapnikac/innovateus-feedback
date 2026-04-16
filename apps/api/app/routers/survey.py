@@ -84,8 +84,10 @@ def _fix_conditional_order(questions: list[dict]) -> None:
 async def get_survey(cohort_id: uuid.UUID, response: Response, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Cohort).where(Cohort.id == cohort_id))
     cohort = result.scalar_one_or_none()
+    if not cohort:
+        raise HTTPException(status_code=404, detail="Cohort not found")
 
-    config = cohort.survey_config if cohort else None
+    config = cohort.survey_config
     if not config:
         try:
             config = _load_default_survey()

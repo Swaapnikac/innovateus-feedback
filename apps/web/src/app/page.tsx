@@ -12,6 +12,8 @@ import {
   Sparkles,
 } from "lucide-react";
 
+const DEFAULT_COHORT_ID = process.env.NEXT_PUBLIC_DEFAULT_COHORT_ID || "00000000-0000-0000-0000-000000000001";
+
 export default function HomePage() {
   return (
     <div className="min-h-screen bg-white">
@@ -20,7 +22,7 @@ export default function HomePage() {
       <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-[#E4EFFC]">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <InnovateLogo size="md" />
-          <Link href="/c/00000000-0000-0000-0000-000000000001">
+          <Link href={`/c/${DEFAULT_COHORT_ID}`}>
             <Button
               size="sm"
               className="bg-[#124D8F] hover:bg-[#124D8F]/90 text-white"
@@ -46,13 +48,13 @@ export default function HomePage() {
               ,{" "}shape the future of public service learning
             </h1>
 
-            <p className="text-lg text-[#124D8F]/60 leading-relaxed max-w-2xl mx-auto">
+            <p className="text-lg text-[#124D8F]/60 leading-relaxed mx-auto" style={{ maxWidth: "46rem" }}>
               Talk it out or type it down, your feedback wears the crown.<br className="hidden sm:inline" />
-              Quick, anonymous, and easy. Your honest thoughts helping public service grow.
+              Quick, anonymous, and effortless. Because better programs start with honest voices.
             </p>
 
             <div className="pt-2">
-              <Link href="/c/00000000-0000-0000-0000-000000000001">
+              <Link href={`/c/${DEFAULT_COHORT_ID}`}>
                 <Button size="lg" className="text-base bg-[#124D8F] hover:bg-[#124D8F]/90 shadow-lg shadow-[#124D8F]/20 hover:shadow-xl hover:shadow-[#124D8F]/25 transition-all gap-2 w-full sm:w-auto">
                   Start Feedback Survey
                   <ArrowRight className="h-4 w-4" />
@@ -197,7 +199,7 @@ export default function HomePage() {
               Speak freely and stay nameless. Just two minutes and a tap, together we close the gap.
             </p>
           </div>
-          <Link href="/c/00000000-0000-0000-0000-000000000001">
+          <Link href={`/c/${DEFAULT_COHORT_ID}`}>
             <Button size="lg" className="text-base bg-[#FDCE3E] text-[#124D8F] hover:bg-[#FDCE3E]/90 font-semibold shadow-lg gap-2">
               Take the Survey
               <ArrowRight className="h-4 w-4" />

@@ -38,6 +38,7 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", on
   const chunksRef = useRef<Blob[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
+  const isRecordingRef = useRef(false);
   const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const finalTranscriptRef = useRef("");
@@ -83,6 +84,8 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", on
   }, []);
 
   const stopRecording = useCallback(() => {
+    isRecordingRef.current = false;
+
     if (recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch {}
       recognitionRef.current = null;
@@ -200,7 +203,7 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", on
         };
 
         recognition.onend = () => {
-          if (isRecording && recognitionRef.current) {
+          if (isRecordingRef.current && recognitionRef.current) {
             try { recognitionRef.current.start(); } catch {}
           }
         };
@@ -210,6 +213,7 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", on
       }
 
       mediaRecorder.start(1000);
+      isRecordingRef.current = true;
       setIsRecording(true);
       onRecordingStarted?.();
       resetInactivityTimer();
@@ -338,10 +342,10 @@ export function VoiceRecorder({ onTranscriptComplete, initialTranscript = "", on
             onClick={handleDone}
             disabled={!transcript.trim() || isBusy}
             size="lg"
-            variant={confirmed ? "default" : "outline"}
+            variant="default"
             className={confirmed
               ? "gap-2 bg-brand-teal hover:bg-brand-teal/90 border-brand-teal text-white"
-              : "gap-2 border-brand-teal/40 text-brand-teal/70 hover:bg-brand-teal/5 hover:border-brand-teal hover:text-brand-teal"
+              : "gap-2 bg-brand-blue hover:bg-brand-blue/90 text-white shadow-md hover:shadow-lg transition-all"
             }
           >
             {confirmed ? (

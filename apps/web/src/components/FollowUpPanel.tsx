@@ -23,6 +23,8 @@ interface FollowUpPanelProps {
   initialAnswers?: { followup_1_answer?: string; followup_2_answer?: string };
   // Whether a vagueness check is in progress (parent controls spinner)
   checkingVagueness?: boolean;
+  // When true, renders all followups with inline-editable textareas (review edit mode)
+  editMode?: boolean;
 }
 
 export interface FollowUpPanelHandle {
@@ -37,8 +39,8 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
   onFollowupsUpdated,
   initialAnswers,
   checkingVagueness = false,
+  editMode = false,
 }, ref) {
-  console.log("[PANEL-MOUNT] initialAnswers:", initialAnswers, "initialFollowups:", initialFollowups);
   const initialMap: Record<number, string> = {};
   if (initialAnswers?.followup_1_answer) initialMap[0] = initialAnswers.followup_1_answer;
   if (initialAnswers?.followup_2_answer) initialMap[1] = initialAnswers.followup_2_answer;
@@ -50,7 +52,7 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
   // Which index is active. Start at first unanswered, or null if all answered.
   const firstUnanswered = initialFollowups.findIndex((_, i) => !initialMap[i]);
   const [activeIndex, setActiveIndex] = useState<number | null>(
-    firstUnanswered >= 0 ? firstUnanswered : null
+    editMode ? null : (firstUnanswered >= 0 ? firstUnanswered : null)
   );
   const [inputMode, setInputMode] = useState<"text" | "voice">("voice");
 
@@ -75,8 +77,8 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
 
     // If this is follow-up 0 (first), check vagueness of its answer to decide
     // whether to generate a follow-up 2. Only do this if there's no follow-up 2
-    // yet and we have a vagueness checker.
-    if (idx === 0 && followups.length < 2 && savedAnswers[0] && onCheckFollowupVagueness) {
+    // yet and we have a vagueness checker. Skip in edit mode — the thread is complete.
+    if (!editMode && idx === 0 && followups.length < 2 && savedAnswers[0] && onCheckFollowupVagueness) {
       const newFollowup = await onCheckFollowupVagueness(
         followups[0],
         savedAnswers[0],
@@ -134,6 +136,93 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
     setActiveIndex(null);
   };
 
+  // ── Edit mode: inline-editable thread view with Type/Voice toggle ──
+  // Track input mode per followup index so each can independently use voice or text
+  const [editModes, setEditModes] = useState<Record<number, "text" | "voice">>({});
+
+  if (editMode) {
+    const handleEditModeChange = (idx: number, value: string) => {
+      const updated = { ...answers, [idx]: value.slice(0, 5000) };
+      setAnswers(updated);
+      // Auto-save to parent on every change so "Back to Review" picks up edits
+      onAnswerSaved(buildAnswerPayload(updated));
+    };
+
+    const handleEditModeTranscript = (idx: number, transcript: string) => {
+      const updated = { ...answers, [idx]: transcript };
+      setAnswers(updated);
+      onAnswerSaved(buildAnswerPayload(updated));
+      // Switch to text mode so user can see and edit the transcript
+      setEditModes((prev) => ({ ...prev, [idx]: "text" }));
+    };
+
+    const getEditInputMode = (idx: number) => editModes[idx] || "text";
+
+    return (
+      <div className="relative border-l-2 border-brand-yellow/50 pl-5 ml-4 mt-2 space-y-5">
+        <div className="absolute -left-[7px] top-0 w-3 h-3 rounded-full bg-brand-yellow" />
+
+        <p className="text-sm font-medium text-brand-dark-yellow flex items-center gap-2">
+          <MessageCircle className="h-4 w-4" />
+          Follow-up questions
+        </p>
+
+        {followups.map((fq, i) => {
+          const mode = getEditInputMode(i);
+          return (
+            <div key={i} className="space-y-3">
+              <p className="text-sm font-medium text-brand-blue/70">{fq}</p>
+
+              <div className="inline-flex rounded-lg border bg-muted p-1 gap-1">
+                <Button
+                  type="button"
+                  variant={mode === "text" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setEditModes((prev) => ({ ...prev, [i]: "text" }))}
+                  className="gap-1.5 !rounded-md text-xs"
+                >
+                  <Type className="h-3.5 w-3.5" />
+                  Type
+                </Button>
+                <Button
+                  type="button"
+                  variant={mode === "voice" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setEditModes((prev) => ({ ...prev, [i]: "voice" }))}
+                  className="gap-1.5 !rounded-md text-xs"
+                >
+                  <Mic className="h-3.5 w-3.5" />
+                  Voice
+                </Button>
+              </div>
+
+              {mode === "text" ? (
+                <div className="space-y-1">
+                  <Textarea
+                    value={answers[i] || ""}
+                    onChange={(e) => handleEditModeChange(i, e.target.value)}
+                    placeholder="Type your response (optional)..."
+                    className="min-h-[80px] resize-y text-sm"
+                    maxLength={5000}
+                  />
+                  <p className={`text-xs text-right ${(answers[i]?.length || 0) >= 4900 ? "text-brand-red" : "text-brand-blue/40"}`}>
+                    {answers[i]?.length || 0}/5000
+                  </p>
+                </div>
+              ) : (
+                <VoiceRecorder
+                  onTranscriptComplete={(transcript) => handleEditModeTranscript(i, transcript)}
+                  initialTranscript={answers[i] || ""}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // ── Normal mode: sequential answering flow ──
   return (
     <div className="relative border-l-2 border-brand-yellow/50 pl-5 ml-4 mt-2 space-y-4">
       <div className="absolute -left-[7px] top-0 w-3 h-3 rounded-full bg-brand-yellow" />

@@ -58,11 +58,11 @@ def _compute_change_summary(old_config: dict | None, new_config: dict) -> str:
         oq, nq = old_qs[qid], new_qs[qid]
         if oq.get("text") != nq.get("text"):
             changes.append(f"Changed text: {qid}")
-        elif oq.get("type") != nq.get("type"):
+        if oq.get("type") != nq.get("type"):
             changes.append(f"Changed type: {qid}")
-        elif json.dumps(oq.get("options"), sort_keys=True) != json.dumps(nq.get("options"), sort_keys=True):
+        if json.dumps(oq.get("options"), sort_keys=True) != json.dumps(nq.get("options"), sort_keys=True):
             changes.append(f"Changed options: {qid}")
-        elif oq.get("group") != nq.get("group"):
+        if oq.get("group") != nq.get("group"):
             changes.append(f"Changed group: {qid}")
 
     old_order = [q["id"] for q in old_config.get("questions", [])]
@@ -163,7 +163,7 @@ async def save_editor_survey(cohort_id: uuid.UUID, req: SaveSurveyRequest, db: A
 
     change_summary = _compute_change_summary(cohort.survey_config, new_config)
     version_label = await _next_version_label(db, cohort_id)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     version = SurveyConfigVersion(
         id=uuid.uuid4(),
@@ -272,7 +272,7 @@ async def restore_version(cohort_id: uuid.UUID, version_label: str, db: AsyncSes
         raise HTTPException(status_code=404, detail="Version not found")
 
     new_label = await _next_version_label(db, cohort_id)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     new_version = SurveyConfigVersion(
         id=uuid.uuid4(),

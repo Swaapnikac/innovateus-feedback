@@ -130,7 +130,7 @@ async def detect_vagueness_with_followups(question_text: str, answer_text: str) 
             "is_irrelevant": result.get("is_irrelevant", False),
             "reason": result.get("reason", ""),
             "missing_info_types": result.get("missing_info_types", []),
-            "followups": followups[:2],
+            "followups": followups[:1],
         }
     except Exception as e:
         logger.warning(f"Combined vagueness+followup detection failed: {e}")

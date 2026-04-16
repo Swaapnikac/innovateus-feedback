@@ -85,10 +85,10 @@ async def start_submission(req: StartSubmissionRequest, request: Request, db: As
         survey_version=cohort.active_version,
         ip_hash=ip_hash,
         client_metadata=req.client_metadata,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
     db.add(submission)
-    await db.commit()
+    await db.flush()
 
     return StartSubmissionResponse(submission_id=submission.id)
 
@@ -116,26 +116,16 @@ async def save_answer(submission_id: uuid.UUID, req: AnswerRequest, db: AsyncSes
 
     if existing:
         answer_id = existing.id
-        if answer_raw is not None:
-            existing.answer_raw = answer_raw
-        if transcript is not None:
-            existing.transcript = transcript
-        if req.question_type is not None:
-            existing.question_type = req.question_type
-        if req.input_mode is not None:
-            existing.input_mode = req.input_mode
-        if req.is_vague is not None:
-            existing.is_vague = req.is_vague
-        if req.followups_asked is not None:
-            existing.followups_asked = req.followups_asked
-        if req.followup_1 is not None:
-            existing.followup_1 = req.followup_1
-        if followup_1_answer is not None:
-            existing.followup_1_answer = followup_1_answer
-        if req.followup_2 is not None:
-            existing.followup_2 = req.followup_2
-        if followup_2_answer is not None:
-            existing.followup_2_answer = followup_2_answer
+        existing.answer_raw = answer_raw
+        existing.transcript = transcript
+        existing.question_type = req.question_type or existing.question_type
+        existing.input_mode = req.input_mode or existing.input_mode
+        existing.is_vague = req.is_vague
+        existing.followups_asked = req.followups_asked if req.followups_asked is not None else existing.followups_asked
+        existing.followup_1 = req.followup_1
+        existing.followup_1_answer = followup_1_answer
+        existing.followup_2 = req.followup_2
+        existing.followup_2_answer = followup_2_answer
     else:
         answer_id = uuid.uuid4()
         answer = Answer(
@@ -155,7 +145,6 @@ async def save_answer(submission_id: uuid.UUID, req: AnswerRequest, db: AsyncSes
         )
         db.add(answer)
 
-    await db.commit()
     return AnswerResponse(id=answer_id, question_id=req.question_id)
 
 
@@ -230,14 +219,13 @@ async def complete_submission(submission_id: uuid.UUID, response: Response, db: 
         logger.warning(f"Extraction failed for submission {submission_id}: {e}")
         extraction_data = dict(_EMPTY_EXTRACTION)
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     time_to_complete = None
     if sub.created_at:
         try:
             created = sub.created_at
-            # strip tz if present so both are naive UTC
-            if created.tzinfo is not None:
-                created = created.replace(tzinfo=None)
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
             time_to_complete = int((now - created).total_seconds())
         except Exception:
             pass
@@ -272,6 +260,7 @@ async def complete_submission(submission_id: uuid.UUID, response: Response, db: 
         )
         db.add(ext)
 
+    # Qualtrics sync needs committed data (it opens its own session)
     await db.commit()
 
     # Qualtrics sync
@@ -309,6 +298,5 @@ async def save_experience_rating(submission_id: uuid.UUID, req: ExperienceRating
 
     sub.experience_rating = req.rating
     sub.experience_feedback = strip_pii(req.feedback_text) if req.feedback_text else None
-    await db.commit()
 
     return {"status": "saved", "rating": req.rating}

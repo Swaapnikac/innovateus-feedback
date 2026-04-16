@@ -28,22 +28,21 @@ def _get_client_ip(request: Request) -> str:
 @router.post("/events", status_code=status.HTTP_202_ACCEPTED)
 async def track_events(req: TrackEventsRequest, request: Request, db: AsyncSession = Depends(get_db)):
     ip_hash = _hash_ip(_get_client_ip(request))
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     for evt in req.events:
         event = Event(
             id=uuid.uuid4(),
             session_token=req.session_token,
-            cohort_id=req.cohort_id or "",
-            submission_id=req.submission_id or "",
+            cohort_id=req.cohort_id or None,
+            submission_id=req.submission_id or None,
             event_type=evt.event_type,
             event_data=evt.event_data,
             ip_hash=ip_hash,
-            timestamp=datetime.fromisoformat(evt.timestamp).replace(tzinfo=None) if evt.timestamp else datetime.utcnow(),
+            timestamp=datetime.fromisoformat(evt.timestamp) if evt.timestamp else datetime.now(timezone.utc),
         )
         db.add(event)
 
-    await db.commit()
     return {"status": "accepted", "count": len(req.events)}
 
 
@@ -54,17 +53,16 @@ async def track_dropout(req: DropoutRequest, request: Request, db: AsyncSession 
     event = Event(
         id=uuid.uuid4(),
         session_token=req.session_token,
-        cohort_id=req.cohort_id or "",
-        submission_id=req.submission_id or "",
+        cohort_id=req.cohort_id or None,
+        submission_id=req.submission_id or None,
         event_type="question_dropout",
         event_data={
             "last_question_id": req.last_question_id,
             "questions_answered": req.questions_answered,
         },
         ip_hash=ip_hash,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
     )
     db.add(event)
-    await db.commit()
 
     return {"status": "accepted"}

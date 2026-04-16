@@ -258,7 +258,7 @@ async def sync_submission(submission_id: uuid.UUID, force: bool = False) -> dict
             push_result = await push_to_qualtrics(payload, submission_id)
 
             if push_result["success"]:
-                sub.qualtrics_synced_at = datetime.utcnow()
+                sub.qualtrics_synced_at = datetime.now(timezone.utc)
                 await db.commit()
 
             return push_result
