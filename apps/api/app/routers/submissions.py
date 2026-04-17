@@ -543,7 +543,9 @@ async def complete_submission(submission_id: uuid.UUID, response: Response, db: 
     # Set duplicate-prevention cookie
     cohort_q = await db.execute(select(Cohort).where(Cohort.id == sub.cohort_id))
     cohort = cohort_q.scalar_one_or_none()
-    if cohort and (cohort.max_submissions_per_ip or 0) > 0:
+    # Only set the duplicate-prevention cookie when the cohort actually
+    # enforces a per-IP cap. ``0`` means "unlimited" so we skip the cookie.
+    if cohort and cohort.max_submissions_per_ip is not None and cohort.max_submissions_per_ip > 0:
         cookie_name = f"submitted_{sub.cohort_id}"
         response.set_cookie(
             key=cookie_name,

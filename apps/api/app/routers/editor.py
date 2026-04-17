@@ -120,7 +120,9 @@ async def editor_list_cohorts(db: AsyncSession = Depends(get_db)):
             "name": c.name,
             "course_name": c.course_name,
             "program_type": c.program_type,
-            "max_submissions_per_ip": c.max_submissions_per_ip or 1,
+            "max_submissions_per_ip": (
+                c.max_submissions_per_ip if c.max_submissions_per_ip is not None else 1
+            ),
             "created_at": c.created_at.isoformat() if c.created_at else None,
         }
         for c in cohorts

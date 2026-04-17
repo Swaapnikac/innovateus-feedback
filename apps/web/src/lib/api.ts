@@ -184,15 +184,15 @@ export interface UserTestingAnalytics {
     in_progress: number;
   };
   executive: {
-    completion_rate: number;
-    voice_adoption_rate: number;
+    completion_rate: number | null;
+    voice_adoption_rate: number | null;
     avg_time_to_complete_sec: number | null;
     median_time_to_complete_sec: number | null;
-    follow_up_engagement_rate: number;
+    follow_up_engagement_rate: number | null;
     extraction_usefulness_rate: number | null;
     qualtrics_sync_success_rate: number | null;
     critical_error_count: number;
-    mode_switch_rate: number;
+    mode_switch_rate: number | null;
   };
   funnel: Array<{ stage: string; count: number }>;
   voice_vs_text: {
@@ -202,25 +202,25 @@ export interface UserTestingAnalytics {
     median_text_word_count: number | null;
     voice_open_answer_count: number;
     text_open_answer_count: number;
-    voice_vague_rate: number;
-    text_vague_rate: number;
-    mode_switch_rate: number;
+    voice_vague_rate: number | null;
+    text_vague_rate: number | null;
+    mode_switch_rate: number | null;
   };
   followup_effectiveness: {
     followups_shown_total: number;
     followups_answered_total: number;
-    followup_engagement_rate: number;
+    followup_engagement_rate: number | null;
     initial_vague_count: number;
     vague_after_followups_count: number;
-    post_followup_vagueness_rate: number;
+    post_followup_vagueness_rate: number | null;
     specificity_improvement_count: number;
-    specificity_improvement_rate: number;
+    specificity_improvement_rate: number | null;
     top_followup_prompts: Array<{
       prompt: string;
       shown: number;
       answered: number;
       improved: number;
-      improvement_rate: number;
+      improvement_rate: number | null;
     }>;
   };
   survey_friction: {
@@ -231,30 +231,30 @@ export interface UserTestingAnalytics {
   voice_ux: {
     started_in_voice_count: number;
     voice_conversation_completed_count: number;
-    voice_conversation_completion_rate: number;
-    transcript_edit_rate: number;
-    mic_permission_failure_rate: number;
+    voice_conversation_completion_rate: number | null;
+    transcript_edit_rate: number | null;
+    mic_permission_failure_rate: number | null;
     voice_duration_distribution: Array<{ bucket: string; count: number }>;
   };
   technical_health: {
     browser_breakdown: Array<{ label: string; count: number }>;
     os_breakdown: Array<{ label: string; count: number }>;
     device_breakdown: Array<{ label: string; count: number }>;
-    browser_error_rate: Record<string, number>;
+    browser_error_rate: Record<string, number | null>;
     avg_api_latency_ms: number | null;
     max_api_latency_ms: number | null;
     total_timeouts: number;
     total_api_failures: number;
     client_error_count: number;
     critical_error_count: number;
-    critical_error_rate: number;
+    critical_error_rate: number | null;
   };
   extraction_quality: {
-    extraction_success_rate: number;
+    extraction_success_rate: number | null;
     extractions_total: number;
     reviews_total: number;
     reviews_with_useful_flag: number;
-    review_coverage_rate: number;
+    review_coverage_rate: number | null;
     extraction_usefulness_rate: number | null;
     avg_accuracy_rating: number | null;
     avg_usefulness_rating: number | null;

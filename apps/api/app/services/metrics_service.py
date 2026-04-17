@@ -77,9 +77,16 @@ def word_count(text: Optional[str]) -> int:
     return len([w for w in text.split() if w.strip()])
 
 
-def safe_ratio(num: int | float, denom: int | float) -> float:
+def safe_ratio(num: int | float, denom: int | float) -> Optional[float]:
+    """Ratio that returns ``None`` when there is no denominator.
+
+    This is intentional: for dashboard metrics there is a real UX
+    difference between "0% because the data says 0%" and "n/a because
+    nothing has happened yet". Callers that want the old behaviour can
+    coalesce with ``or 0.0`` at the call site.
+    """
     if not denom:
-        return 0.0
+        return None
     return round(num / denom, 4)
 
 

@@ -180,17 +180,25 @@ async def _denormalize_event(
         return
 
     if etype == "api_latency" and sub is not None:
+        # Accept both ``duration_ms`` (frontend ``trackApiLatency`` payload)
+        # and ``latency_ms`` (older name) so we don't silently record 0ms
+        # for every call if the two diverge.
+        raw_latency = data.get("duration_ms")
+        if raw_latency is None:
+            raw_latency = data.get("latency_ms")
         try:
-            latency = int(data.get("latency_ms") or 0)
+            latency = max(0, int(raw_latency)) if raw_latency is not None else 0
         except (TypeError, ValueError):
             latency = 0
         ok = bool(data.get("ok", True))
         is_timeout = bool(data.get("timeout"))
         total_calls = (sub.total_api_calls or 0) + 1
-        prev_avg = sub.avg_api_latency_ms or 0
-        new_avg = int(((prev_avg * (total_calls - 1)) + latency) / total_calls)
+        prev_avg = float(sub.avg_api_latency_ms or 0)
+        # Running mean in float space; only cast to int at the end so we
+        # don't accumulate truncation error across hundreds of calls.
+        new_avg = ((prev_avg * (total_calls - 1)) + latency) / total_calls
         sub.total_api_calls = total_calls
-        sub.avg_api_latency_ms = new_avg
+        sub.avg_api_latency_ms = int(round(new_avg))
         sub.max_api_latency_ms = max(sub.max_api_latency_ms or 0, latency)
         if not ok:
             sub.total_api_failures = (sub.total_api_failures or 0) + 1

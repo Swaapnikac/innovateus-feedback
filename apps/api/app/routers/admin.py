@@ -252,7 +252,9 @@ async def list_cohorts(db: AsyncSession = Depends(get_db)):
             name=c.name,
             course_name=c.course_name,
             program_type=c.program_type,
-            max_submissions_per_ip=c.max_submissions_per_ip or 1,
+            max_submissions_per_ip=(
+                c.max_submissions_per_ip if c.max_submissions_per_ip is not None else 1
+            ),
             created_at=c.created_at,
         )
         for c in cohorts
@@ -549,7 +551,11 @@ async def duplicate_cohort(cohort_id: uuid.UUID, db: AsyncSession = Depends(get_
         program_type=source.program_type,
         survey_config=config,
         active_version="v1",
-        max_submissions_per_ip=source.max_submissions_per_ip or 1,
+        # Preserve the source's cap exactly; ``0`` means "unlimited" and
+        # must not be coerced to 1 by a truthiness fallback.
+        max_submissions_per_ip=(
+            source.max_submissions_per_ip if source.max_submissions_per_ip is not None else 1
+        ),
         created_at=now,
     )
     db.add(new_cohort)
@@ -571,7 +577,9 @@ async def duplicate_cohort(cohort_id: uuid.UUID, db: AsyncSession = Depends(get_
         name=new_name,
         course_name=source.course_name,
         program_type=source.program_type,
-        max_submissions_per_ip=source.max_submissions_per_ip or 1,
+        max_submissions_per_ip=(
+            source.max_submissions_per_ip if source.max_submissions_per_ip is not None else 1
+        ),
         created_at=now,
     )
 

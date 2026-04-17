@@ -349,7 +349,10 @@ class TestUserTestingMetrics:
     def test_empty_inputs_do_not_crash(self):
         m = compute_user_testing_metrics([], {})
         assert m["totals"]["total_submissions"] == 0
-        assert m["executive"]["completion_rate"] == 0.0
+        # With no data we intentionally return ``None`` for rates so the
+        # dashboard can show "—" rather than a misleading 0%.
+        assert m["executive"]["completion_rate"] is None
+        assert m["executive"]["voice_adoption_rate"] is None
         assert m["voice_vs_text"]["avg_voice_word_count"] is None
         assert m["funnel"][0]["count"] == 0
 
@@ -358,6 +361,9 @@ class TestUserTestingMetrics:
 
 
 def test_safe_ratio_zero_denominator():
-    assert safe_ratio(5, 0) == 0.0
+    # ``None`` (not 0.0) when there is nothing to divide by, so callers
+    # can distinguish "no data yet" from "all outcomes were 0".
+    assert safe_ratio(5, 0) is None
+    assert safe_ratio(0, 0) is None
     assert safe_ratio(0, 10) == 0.0
     assert safe_ratio(3, 10) == 0.3

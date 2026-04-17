@@ -91,6 +91,17 @@ function secs(v: number | null | undefined): string {
   return `${m}m ${s}s`;
 }
 
+// Target-comparison helpers that treat ``null`` (no data yet) as
+// "target not met" rather than coercing to 0 and producing a bogus
+// green badge when nothing has been measured.
+function meetsMin(value: number | null | undefined, min: number): boolean {
+  return value !== null && value !== undefined && value >= min;
+}
+
+function meetsMax(value: number | null | undefined, max: number): boolean {
+  return value !== null && value !== undefined && value <= max;
+}
+
 interface CardTarget {
   label: string;
   value: string;
@@ -239,64 +250,68 @@ export default function UserTestingAnalyticsPage() {
         label: "Completion rate (S1)",
         value: pct(exec.completion_rate),
         target: pct(targets["completion_rate"]),
-        meets: exec.completion_rate >= targets["completion_rate"],
+        meets: meetsMin(exec.completion_rate, targets["completion_rate"]),
       },
       {
         label: "Voice adoption (S2)",
         value: pct(exec.voice_adoption_rate),
         target: pct(targets["voice_adoption_rate"]),
-        meets: exec.voice_adoption_rate >= targets["voice_adoption_rate"],
+        meets: meetsMin(exec.voice_adoption_rate, targets["voice_adoption_rate"]),
       },
       {
         label: "Post-FU vagueness (S3)",
         value: pct(analytics.followup_effectiveness.post_followup_vagueness_rate),
         target: `≤ ${pct(targets["post_followup_vagueness_rate_max"])}`,
-        meets:
-          analytics.followup_effectiveness.post_followup_vagueness_rate <=
+        meets: meetsMax(
+          analytics.followup_effectiveness.post_followup_vagueness_rate,
           targets["post_followup_vagueness_rate_max"],
+        ),
       },
       {
         label: "Avg voice word count (S4)",
         value: num(analytics.voice_vs_text.avg_voice_word_count, 1),
         target: `≥ ${targets["avg_voice_word_count_min"]}`,
-        meets:
-          (analytics.voice_vs_text.avg_voice_word_count ?? 0) >=
-          (targets["avg_voice_word_count_min"] || 0),
+        meets: meetsMin(
+          analytics.voice_vs_text.avg_voice_word_count,
+          targets["avg_voice_word_count_min"] || 0,
+        ),
       },
       {
         label: "Extraction usefulness (S5)",
         value: pct(analytics.extraction_quality.extraction_usefulness_rate),
         target: pct(targets["extraction_usefulness_rate_min"]),
-        meets:
-          analytics.extraction_quality.extraction_usefulness_rate !== null &&
-          analytics.extraction_quality.extraction_usefulness_rate >=
+        meets: meetsMin(
+          analytics.extraction_quality.extraction_usefulness_rate,
           targets["extraction_usefulness_rate_min"],
+        ),
         hint: `${analytics.extraction_quality.reviews_with_useful_flag} rated / ${analytics.extraction_quality.extractions_total} extractions`,
       },
       {
         label: "Avg time to complete (S6)",
         value: secs(exec.avg_time_to_complete_sec),
         target: `≤ ${secs(targets["avg_time_to_complete_max_sec"])}`,
-        meets:
-          !!exec.avg_time_to_complete_sec &&
-          exec.avg_time_to_complete_sec <= targets["avg_time_to_complete_max_sec"],
+        meets: meetsMax(
+          exec.avg_time_to_complete_sec,
+          targets["avg_time_to_complete_max_sec"],
+        ),
       },
       {
         label: "Qualtrics sync (S8)",
         value: pct(exec.qualtrics_sync_success_rate),
         target: pct(targets["qualtrics_sync_success_rate_min"]),
-        meets:
-          exec.qualtrics_sync_success_rate !== null &&
-          exec.qualtrics_sync_success_rate >=
+        meets: meetsMin(
+          exec.qualtrics_sync_success_rate,
           targets["qualtrics_sync_success_rate_min"],
+        ),
       },
       {
         label: "Voice conv. completion (S10)",
         value: pct(analytics.voice_ux.voice_conversation_completion_rate),
         target: pct(targets["voice_conversation_completion_rate_min"]),
-        meets:
-          analytics.voice_ux.voice_conversation_completion_rate >=
+        meets: meetsMin(
+          analytics.voice_ux.voice_conversation_completion_rate,
           targets["voice_conversation_completion_rate_min"],
+        ),
         hint: `${analytics.voice_ux.voice_conversation_completed_count} of ${analytics.voice_ux.started_in_voice_count} voice starters`,
       },
       {
@@ -319,13 +334,13 @@ export default function UserTestingAnalyticsPage() {
       {
         label: "Voice",
         avg_word_count: analytics.voice_vs_text.avg_voice_word_count ?? 0,
-        vague_rate: analytics.voice_vs_text.voice_vague_rate * 100,
+        vague_rate: (analytics.voice_vs_text.voice_vague_rate ?? 0) * 100,
         count: analytics.voice_vs_text.voice_open_answer_count,
       },
       {
         label: "Text",
         avg_word_count: analytics.voice_vs_text.avg_text_word_count ?? 0,
-        vague_rate: analytics.voice_vs_text.text_vague_rate * 100,
+        vague_rate: (analytics.voice_vs_text.text_vague_rate ?? 0) * 100,
         count: analytics.voice_vs_text.text_open_answer_count,
       },
     ];
