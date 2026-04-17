@@ -91,7 +91,9 @@ async def start_submission(req: StartSubmissionRequest, request: Request, db: As
 
     client_ip = _get_client_ip(request)
     ip_hash = _hash_ip(client_ip)
-    limit = cohort.max_submissions_per_ip or 1
+    # ``max_submissions_per_ip`` is an explicit cap; 0 means "unlimited".
+    # Only fall back to the default (1) when the column is NULL.
+    limit = cohort.max_submissions_per_ip if cohort.max_submissions_per_ip is not None else 1
 
     if limit > 0:
         completed_q = await db.execute(
@@ -436,7 +438,9 @@ async def complete_submission(submission_id: uuid.UUID, response: Response, db: 
             created = sub.created_at
             if created.tzinfo is None:
                 created = created.replace(tzinfo=timezone.utc)
-            time_to_complete = int((now - created).total_seconds())
+            delta = int((now - created).total_seconds())
+            if delta >= 0:
+                time_to_complete = delta
         except Exception:
             pass
 
@@ -444,6 +448,47 @@ async def complete_submission(submission_id: uuid.UUID, response: Response, db: 
     sub.completed_at = now
     sub.last_activity_at = now
     sub.time_to_complete_sec = time_to_complete
+
+    # Infer mode-switch flags from the actual answer sequence as a fallback
+    # for clients that do not emit ``mode_switched`` events. We look at each
+    # open-ended answer's initial mode followed by its follow-up modes so we
+    # catch both inter-question switches (e.g. Q1 voice -> Q2 text) and
+    # intra-question switches (e.g. initial text -> follow-up voice).
+    mode_sequence: list[str] = []
+    open_answers = [
+        a
+        for a in answers
+        if (a.question_type or "").lower() in {"open", "open_text", "open_voice"}
+        and (a.answer_raw or "").strip()
+    ]
+    for a in open_answers:
+        initial = (a.input_mode or "").lower()
+        if initial:
+            mode_sequence.append(initial)
+        for fu_mode, fu_answer in (
+            ((a.followup_1_input_mode or "").lower(), a.followup_1_answer),
+            ((a.followup_2_input_mode or "").lower(), a.followup_2_answer),
+        ):
+            if fu_mode and fu_answer:
+                mode_sequence.append(fu_mode)
+
+    transitions = [
+        (mode_sequence[i - 1], mode_sequence[i])
+        for i in range(1, len(mode_sequence))
+        if mode_sequence[i - 1] != mode_sequence[i]
+    ]
+    if transitions:
+        v_to_t = any(prev == "voice" and curr == "text" for prev, curr in transitions)
+        t_to_v = any(prev == "text" and curr == "voice" for prev, curr in transitions)
+        if v_to_t and not sub.switched_voice_to_text_any:
+            sub.switched_voice_to_text_any = True
+        if t_to_v and not sub.switched_text_to_voice_any:
+            sub.switched_text_to_voice_any = True
+    initial_open_modes = [(a.input_mode or "").lower() for a in open_answers]
+    if sub.started_in_voice is None and initial_open_modes:
+        sub.started_in_voice = initial_open_modes[0] == "voice"
+    if sub.ended_in_voice is None and initial_open_modes:
+        sub.ended_in_voice = initial_open_modes[-1] == "voice"
 
     # Save extraction
     existing_ext = await db.execute(select(Extraction).where(Extraction.submission_id == submission_id))

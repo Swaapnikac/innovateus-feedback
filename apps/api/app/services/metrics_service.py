@@ -460,7 +460,13 @@ def compute_user_testing_metrics(
     review_values = list(reviews_by_sub.values()) if reviews_by_sub else []
     reviews_with_useful = [r for r in review_values if r.useful_flag is not None]
     useful_count = sum(1 for r in reviews_with_useful if r.useful_flag)
-    extraction_usefulness_rate = safe_ratio(useful_count, len(reviews_with_useful))
+    # ``None`` (not 0.0) when no reviews exist so the dashboard can distinguish
+    # "nobody has reviewed extractions yet" from "all reviews said not useful".
+    extraction_usefulness_rate = (
+        safe_ratio(useful_count, len(reviews_with_useful))
+        if reviews_with_useful
+        else None
+    )
     review_coverage = safe_ratio(len(review_values), len(completed))
     accuracy_ratings = [r.accuracy_rating for r in review_values if r.accuracy_rating is not None]
     usefulness_ratings = [r.usefulness_rating for r in review_values if r.usefulness_rating is not None]
@@ -477,7 +483,14 @@ def compute_user_testing_metrics(
     # ── S8 Qualtrics sync ──
     qualtrics_attempted = [s for s in completed if (s.qualtrics_sync_attempt_count or 0) > 0]
     qualtrics_succeeded = [s for s in qualtrics_attempted if s.qualtrics_synced_at is not None]
-    qualtrics_sync_success_rate = safe_ratio(len(qualtrics_succeeded), len(qualtrics_attempted))
+    # ``None`` when Qualtrics hasn't been attempted for any submission (e.g.
+    # the integration is not configured) so the dashboard can show "n/a"
+    # rather than a misleading 0%.
+    qualtrics_sync_success_rate = (
+        safe_ratio(len(qualtrics_succeeded), len(qualtrics_attempted))
+        if qualtrics_attempted
+        else None
+    )
     qualtrics_failed = [s for s in qualtrics_attempted if not s.qualtrics_synced_at]
     qualtrics_latencies = [s.qualtrics_sync_latency_ms for s in qualtrics_succeeded if s.qualtrics_sync_latency_ms]
     avg_qualtrics_latency_ms = round(mean(qualtrics_latencies), 1) if qualtrics_latencies else None

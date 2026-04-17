@@ -268,6 +268,7 @@ export default function UserTestingAnalyticsPage() {
         value: pct(analytics.extraction_quality.extraction_usefulness_rate),
         target: pct(targets["extraction_usefulness_rate_min"]),
         meets:
+          analytics.extraction_quality.extraction_usefulness_rate !== null &&
           analytics.extraction_quality.extraction_usefulness_rate >=
           targets["extraction_usefulness_rate_min"],
         hint: `${analytics.extraction_quality.reviews_with_useful_flag} rated / ${analytics.extraction_quality.extractions_total} extractions`,
@@ -285,6 +286,7 @@ export default function UserTestingAnalyticsPage() {
         value: pct(exec.qualtrics_sync_success_rate),
         target: pct(targets["qualtrics_sync_success_rate_min"]),
         meets:
+          exec.qualtrics_sync_success_rate !== null &&
           exec.qualtrics_sync_success_rate >=
           targets["qualtrics_sync_success_rate_min"],
       },

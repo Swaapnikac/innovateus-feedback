@@ -189,8 +189,8 @@ export interface UserTestingAnalytics {
     avg_time_to_complete_sec: number | null;
     median_time_to_complete_sec: number | null;
     follow_up_engagement_rate: number;
-    extraction_usefulness_rate: number;
-    qualtrics_sync_success_rate: number;
+    extraction_usefulness_rate: number | null;
+    qualtrics_sync_success_rate: number | null;
     critical_error_count: number;
     mode_switch_rate: number;
   };
@@ -255,7 +255,7 @@ export interface UserTestingAnalytics {
     reviews_total: number;
     reviews_with_useful_flag: number;
     review_coverage_rate: number;
-    extraction_usefulness_rate: number;
+    extraction_usefulness_rate: number | null;
     avg_accuracy_rating: number | null;
     avg_usefulness_rating: number | null;
   };
@@ -264,7 +264,7 @@ export interface UserTestingAnalytics {
     attempted_count: number;
     succeeded_count: number;
     failed_count: number;
-    success_rate: number;
+    success_rate: number | null;
     avg_latency_ms: number | null;
     recent_failures: Array<{
       submission_id: string;
