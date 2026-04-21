@@ -23,7 +23,7 @@
  *   L. Filters (cohort + date range, preserved in the URL)
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Bar,
@@ -179,7 +179,7 @@ function HypothesisCard({
   );
 }
 
-export default function UserTestingAnalyticsPage() {
+function UserTestingAnalyticsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -1164,5 +1164,21 @@ function FacilitatorSection({
         </Card>
       </div>
     </section>
+  );
+}
+
+function UserTestingAnalyticsLoading() {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="text-sm text-muted-foreground">Loading analytics…</div>
+    </div>
+  );
+}
+
+export default function UserTestingAnalyticsPage() {
+  return (
+    <Suspense fallback={<UserTestingAnalyticsLoading />}>
+      <UserTestingAnalyticsContent />
+    </Suspense>
   );
 }
