@@ -412,6 +412,20 @@ export const api = {
       }),
     }),
 
+  // Context-aware check used AFTER follow-up 1 has been answered, to decide
+  // whether a follow-up 2 is genuinely needed. The backend uses a stricter,
+  // follow-up-level prompt that knows the participant already had one chance.
+  checkFollowupForClarification: (data: {
+    original_question: string;
+    original_answer: string;
+    followup_question: string;
+    followup_answer: string;
+  }) =>
+    request<VaguenessResult & FollowUpResult>("/v1/ai/check-followup", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   getFollowups: (
     questionText: string,
     answerText: string,

@@ -181,11 +181,16 @@ export default function SurveyPage() {
 
   // When navigating to a question, restore follow-up panel if that question
   // had follow-ups generated (e.g. user went Back, or is editing from review).
-  // Uses answersRef so it always reads the latest answer state, not a stale closure.
+  //
+  // Reads from `answers` state (not `answersRef`) because on edit-mode
+  // restoration the ref gets overwritten by the sync effect below before this
+  // effect runs on the post-restore render. The render closure's `answers`
+  // value, however, always reflects the current render's state — so it has
+  // the restored data when this effect re-runs after the question id changes.
   useEffect(() => {
     if (!currentQuestion) return;
     const defaultAns: AnswerState = { value: "", multiValues: [], inputMode: "voice" };
-    const ans = answersRef.current[currentQuestion.id] ?? defaultAns;
+    const ans = answers[currentQuestion.id] ?? defaultAns;
     if (
       currentQuestion.type === "open" &&
       ans.followups &&
@@ -447,15 +452,29 @@ export default function SurveyPage() {
 
   // Called by FollowUpPanel after follow-up 1 is answered, to check if follow-up 2 is needed.
   // Returns a new follow-up question string if vague, or null if not.
+  //
+  // Uses the context-aware ``/v1/ai/check-followup`` endpoint (not the generic
+  // ``/v1/ai/check``) so the model receives the original main question +
+  // answer alongside the follow-up Q+A. This lets the server-side prompt
+  // apply a stricter bar — the participant has already had one clarification
+  // chance, so we only ask again if another round would genuinely add signal.
   const handleCheckFollowupVagueness = useCallback(async (
     followupQuestion: string,
     followupAnswer: string,
     _followupIndex: number,
   ): Promise<string | null> => {
     if (!currentQuestion) return null;
+    // Read from answersRef for the freshest original-answer text — handles
+    // the user switching input modes mid-followup etc.
+    const originalAnswer = answersRef.current[currentQuestion.id]?.value ?? "";
     setCheckingFollowupVagueness(true);
     try {
-      const result = await api.checkWithFollowups(followupQuestion, followupAnswer);
+      const result = await api.checkFollowupForClarification({
+        original_question: currentQuestion.text,
+        original_answer: originalAnswer,
+        followup_question: followupQuestion,
+        followup_answer: followupAnswer,
+      });
       if (!result.is_vague || result.is_irrelevant) return null;
       return result.followups[0] ?? null;
     } catch {

@@ -147,6 +147,76 @@ async def generate_followups(
         return []
 
 
+async def detect_followup_needs_clarification(
+    original_question: str,
+    original_answer: str,
+    followup_question: str,
+    followup_answer: str,
+) -> dict:
+    """Decide whether a FOLLOW-UP answer needs one more clarifying question.
+
+    Uses the ``followup_vagueness`` prompt which is explicitly context-aware:
+    it receives the original main question + answer alongside the follow-up
+    Q+A, so the model can apply a stricter bar than the initial vagueness
+    check (the participant has already had one clarification chance).
+
+    Returns the same shape as ``detect_vagueness_with_followups``.
+    """
+    if not _has_api_key():
+        return {
+            "is_vague": False,
+            "is_irrelevant": False,
+            "reason": "AI analysis unavailable",
+            "missing_info_types": [],
+            "followups": [],
+            "vagueness_score": None,
+        }
+
+    try:
+        client = _get_client()
+        system_prompt = _load_prompt("followup_vagueness")
+
+        response = await client.chat.completions.create(
+            model=get_settings().openai_model_followups,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": json.dumps({
+                        "original_question": original_question,
+                        "original_answer": original_answer,
+                        "followup_question": followup_question,
+                        "followup_answer": followup_answer,
+                    }),
+                },
+            ],
+            temperature=0.2,
+        )
+
+        result = json.loads(response.choices[0].message.content)
+        followups = result.get("followups", [])
+        is_vague = bool(result.get("is_vague", False))
+        return {
+            "is_vague": is_vague,
+            "is_irrelevant": bool(result.get("is_irrelevant", False)),
+            "reason": result.get("reason", ""),
+            "missing_info_types": result.get("missing_info_types", []),
+            "followups": followups[:1],
+            "vagueness_score": _coerce_score(result.get("vagueness_score"), is_vague),
+        }
+    except Exception as e:
+        logger.warning(f"Follow-up clarification check failed: {e}")
+        return {
+            "is_vague": False,
+            "is_irrelevant": False,
+            "reason": "Analysis unavailable",
+            "missing_info_types": [],
+            "followups": [],
+            "vagueness_score": None,
+        }
+
+
 async def detect_vagueness_with_followups(question_text: str, answer_text: str) -> dict:
     """Single LLM call: classify vagueness AND generate follow-ups together.
     Cuts latency from ~3s (two sequential calls) to ~1.5s (one call)."""

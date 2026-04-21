@@ -111,6 +111,17 @@ class VaguenessWithFollowupsResponse(BaseModel):
     followups: list[str]
 
 
+class FollowUpCheckRequest(BaseModel):
+    """Payload for evaluating whether a follow-up answer needs one more
+    clarification. Includes the original question + answer as context so the
+    model can tell this isn't a fresh main-question response."""
+
+    original_question: str = Field(..., max_length=500)
+    original_answer: str = Field(..., max_length=5000)
+    followup_question: str = Field(..., max_length=500)
+    followup_answer: str = Field(..., max_length=5000)
+
+
 class CleanupRequest(BaseModel):
     raw_text: str = Field(..., max_length=5000)
 
