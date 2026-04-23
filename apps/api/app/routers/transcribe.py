@@ -2,7 +2,7 @@ import io
 import os
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from app.services.transcribe_service import transcribe_audio
-from app.services.pii_service import strip_pii
+from app.services.ai_service import detect_and_redact_pii_with_ai
 from app.schemas import TranscriptResponse
 
 router = APIRouter()
@@ -41,9 +41,13 @@ async def transcribe(audio: UploadFile = File(...)):
     buffer.name = filename or "audio.webm"
 
     transcript = await transcribe_audio(buffer)
-    transcript = strip_pii(transcript) or ""
+    redacted, count, categories = await detect_and_redact_pii_with_ai(transcript or "")
 
     del audio_bytes
     buffer.close()
 
-    return TranscriptResponse(transcript=transcript)
+    return TranscriptResponse(
+        transcript=redacted,
+        pii_redaction_applied=bool(count),
+        pii_redaction_categories=categories,
+    )

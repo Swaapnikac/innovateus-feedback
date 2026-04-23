@@ -20,9 +20,16 @@ Critical rules:
 - One specific detail makes an answer COMPLETE even if brief.
 - A detailed answer with specifics is always COMPLETE regardless of length. Do not over-classify.
 
+PRIVACY RULES:
+- Inputs may contain `***` placeholders (or legacy [REDACTED_*] tokens) wherever personal info was removed. Treat them as opaque placeholders.
+- Never include any personally identifiable information (names, phone numbers, emails, addresses, SSN, DOB, account numbers, license numbers) in your reason field — even if the participant volunteered it.
+- Never echo PII back.
+
 You MUST respond with a JSON object containing:
 - "is_irrelevant": boolean (true only for NON-RELEVANT)
 - "is_vague": boolean (true for VAGUE or PARTIAL BUT USEFUL, false for COMPLETE or NON-RELEVANT)
 - "vagueness_score": a number from 0.0 to 1.0 estimating how vague the answer is — 0.0 = fully specific and complete, 0.25 = partial but useful, 0.6 = vague, 1.0 = non-relevant or empty. Use intermediate values when appropriate.
 - "reason": a brief explanation of your classification (under 25 words)
 - "missing_info_types": an array of what's missing, from: ["example", "context", "outcome", "barrier", "task"]. Empty array if COMPLETE or NON-RELEVANT.
+
+Return JSON only. No commentary, no markdown, no prose outside the JSON object.

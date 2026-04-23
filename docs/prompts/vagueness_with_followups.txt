@@ -8,32 +8,42 @@ Action: accept the answer. Do NOT generate any follow-up.
 B. PARTIAL BUT USEFUL — The response is relevant and somewhat informative, but one important detail is missing that would be truly necessary for analysis.
 Action: generate exactly 1 targeted follow-up question for that missing detail only.
 
-C. VAGUE — The response attempts to answer but uses only generic phrases ("helpful", "good", "I learned a lot") with no specific task, outcome, example, or barrier.
+C. VAGUE — The response attempts to answer but uses only generic phrases ("helpful", "good", "I learned a lot") with no specific task, outcome, example, or barrier. The participant is still engaged.
 Action: generate exactly 1 concise follow-up question.
 
-D. NON-RELEVANT — The response does not answer the question at all. It is off-topic, nonsensical, random text, or clearly does not attempt to address what was asked.
+D. VAGUE — DECLINED — The participant indicated they have no more to say ("not sure", "nothing comes to mind", "n/a", "no", "idk").
+Action: set is_vague=true and declined=true. Do NOT generate a follow-up. Respect the participant's choice.
+
+E. NON-RELEVANT — The response does not answer the question at all. It is off-topic, nonsensical, random text, or clearly does not attempt to address what was asked.
 Action: do NOT generate any follow-up. Mark as irrelevant.
 
 STEP 2 — If a follow-up is needed (categories B or C only), generate exactly 1 question:
 - The question must be under 18 words, friendly, conversational, and non-pressuring.
-- Do NOT ask for identifying details (name, department, agency, location).
+- Do NOT ask for identifying details (name, department, agency, location, email, phone, address, SSN, date of birth, or any personal info).
 - Do NOT restate the original question in different words.
 - Focus on the single most important missing piece of information.
 - Do NOT generate a follow-up just because you can. Only ask when the missing detail is genuinely needed.
 
 Critical rules:
 - Be generous. If the answer already contains one specific detail, classify as COMPLETE even if brief.
-- Short answers like "not sure" or "nothing comes to mind" are VAGUE, not irrelevant — but do NOT follow up on them. The participant is done. Classify as VAGUE with no follow-up.
+- Category D ("declined") always wins over C ("vague"). If the participant signals they are done, never push.
 - Only mark as NON-RELEVANT if the answer truly has zero connection to the question.
 - A detailed, specific answer is COMPLETE regardless of length. Do not over-probe.
 - Never generate 2 follow-ups. Generate 0 or 1.
 
+PRIVACY RULES (apply to every response):
+- You may receive text with `***` placeholders (or legacy [REDACTED_*] tokens) wherever personal info was removed. Treat them as opaque placeholders. Do NOT ask the participant to provide the redacted value.
+- Never include any personally identifiable information (names, phone numbers, emails, addresses, SSN, DOB, account numbers, license numbers) in your follow-up question, reason, or any other field — even if the participant volunteered it.
+- Never ask for personal info. If a follow-up would require personal info to be useful, ask a generic clarifier instead or skip the follow-up.
+- Never echo PII back. If unsure whether something is PII, leave it out.
+
 You MUST respond with a JSON object containing:
 - "is_irrelevant": boolean (true only for NON-RELEVANT)
-- "is_vague": boolean (true for VAGUE or PARTIAL BUT USEFUL, false for COMPLETE or NON-RELEVANT)
-- "vagueness_score": a number from 0.0 to 1.0 (0.0 = fully specific, 0.25 = partial but useful, 0.6 = vague, 1.0 = non-relevant/empty)
+- "is_vague": boolean (true for VAGUE, VAGUE-DECLINED or PARTIAL BUT USEFUL; false for COMPLETE or NON-RELEVANT)
+- "declined": boolean (true ONLY for category D — participant said they have no more to say)
+- "vagueness_score": number from 0.0 to 1.0 (0.0 = fully specific, 0.25 = partial but useful, 0.6 = vague, 1.0 = non-relevant/empty)
 - "reason": brief explanation of your classification (under 25 words)
-- "missing_info_types": array from ["example", "context", "outcome", "barrier", "task"] — empty if COMPLETE or NON-RELEVANT
-- "followups": array of 0 or 1 follow-up question strings (empty if COMPLETE, NON-RELEVANT, or participant seems done)
+- "missing_info_types": array from ["example", "context", "outcome", "barrier", "task"] — empty if COMPLETE, NON-RELEVANT, or DECLINED
+- "followups": array of 0 or 1 follow-up question strings (empty if COMPLETE, NON-RELEVANT, or DECLINED)
 
-
+Return JSON only. No commentary, no markdown, no prose outside the JSON object.

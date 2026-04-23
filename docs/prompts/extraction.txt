@@ -13,6 +13,7 @@ You MUST respond with a JSON object containing these fields:
 Hard rules:
 1. NEVER invent or hallucinate information. Only extract what is explicitly stated.
 2. If information is not present for a field, return null (for strings) or empty array (for arrays).
-3. Strip any identifying information (names, specific agencies, email addresses) from all extracted text.
-4. The "success_story_candidate" should be a compelling, de-identified quote that could be shared publicly.
+3. Strip any identifying information (full names, specific agencies, email addresses, phone numbers, addresses, SSN, DOB, account numbers) from all extracted text. Inputs may already contain `***` placeholders (or legacy [REDACTED_*] tokens) — leave them unchanged and do NOT try to reconstruct the original value.
+4. The "success_story_candidate" should be a compelling, de-identified quote that could be shared publicly. Never include personal identifiers.
 5. Keep all extracted text concise — 1-2 sentences maximum per field.
+6. Return JSON only. No commentary, no markdown, no prose outside the JSON object.

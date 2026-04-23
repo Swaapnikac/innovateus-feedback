@@ -29,6 +29,7 @@ import {
   trackPageView,
   trackQuestionStarted,
 } from "@/lib/analytics";
+import { detectPii, summarisePii } from "@/lib/pii";
 
 interface AnswerState {
   value: string;
@@ -57,6 +58,15 @@ export default function SurveyPage() {
   const [checkingFollowupVagueness, setCheckingFollowupVagueness] = useState(false);
   const [editReturnMode, setEditReturnMode] = useState(false);
   const [irrelevantError, setIrrelevantError] = useState("");
+  // Surface when an AI check fails so the user can retry instead of silently
+  // advancing past follow-up questions they never got to see.
+  const [aiCheckError, setAiCheckError] = useState("");
+  // Informational amber banner used for "we removed personal info" notices.
+  // Kept separate from irrelevantError so it survives step advances — otherwise
+  // a complete-answer-with-PII would flash the notice for ~1s during the AI
+  // spinner, then have it wiped by the step-change clear effect before the
+  // user could read it.
+  const [piiNotice, setPiiNotice] = useState("");
   // pendingFollowups holds followup questions between state-setting and render
   const pendingFollowupsRef = useRef<string[] | null>(null);
   // answersRef always points to the latest answers — used in effects that must
@@ -237,8 +247,34 @@ export default function SurveyPage() {
     answersRef.current = answers;
   }, [answers]);
 
+  // Clear transient error banners when the user moves between questions so a
+  // "network hiccup" or "does not seem to answer" message from question N
+  // doesn't hang around on question N+1. ``piiNotice`` is intentionally
+  // NOT cleared here — we want the "we removed personal info" banner to
+  // stay visible on the next question so the user actually sees it (for
+  // complete answers we advance immediately after the AI check, which was
+  // wiping the banner before anyone could read it). It's cleared elsewhere
+  // when the user dismisses it or edits the PII out.
+  useEffect(() => {
+    setIrrelevantError("");
+    setAiCheckError("");
+  }, [currentStep]);
+
   const updateAnswer = (qId: string, update: Partial<AnswerState>) => {
     if (irrelevantError && update.value !== undefined) setIrrelevantError("");
+    // If the answer text changed, re-scan for PII so the notice clears as
+    // soon as the user edits the offending bit out (and refreshes if they
+    // swap one piece of PII for another).
+    if (update.value !== undefined) {
+      const matches = detectPii(update.value);
+      if (matches.length === 0) {
+        if (piiNotice) setPiiNotice("");
+      } else {
+        setPiiNotice(
+          `Your response contains personal information (${summarisePii(matches)}). We'll remove it before saving on our end — you can keep going.`,
+        );
+      }
+    }
     setAnswers((prev) => {
       const existing = prev[qId] || defaultAnswer;
       // If the answer text changed, wipe vagueness/followup state so the next
@@ -332,16 +368,36 @@ export default function SurveyPage() {
   const handleNext = async () => {
     if (!currentQuestion) return;
     setIrrelevantError("");
+    setAiCheckError("");
 
-    // Flush any unsaved typed text from the panel before proceeding
+    // Flush any unsaved typed text from the panel before proceeding.
+    // B8: always propagate the panel state (even when all fields are empty)
+    // so cleared follow-up answers don't leave stale text in sessionStorage.
     if (showFollowups && followUpPanelRef.current) {
       const panelAnswers = followUpPanelRef.current.getCurrentAnswers();
-      if (panelAnswers.followup_1_answer || panelAnswers.followup_2_answer) {
-        updateAnswer(currentQuestion.id, { followupAnswers: panelAnswers });
-      }
+      updateAnswer(currentQuestion.id, { followupAnswers: panelAnswers });
     }
 
     const ans = getAnswer(currentQuestion.id);
+
+    // Client-side PII scan: if the answer contains email / phone / address /
+    // SSN / etc., surface a friendly notice in the dedicated ``piiNotice``
+    // amber banner. We deliberately do NOT use ``irrelevantError`` for this
+    // — that banner is cleared on every step change (see the effect on
+    // ``currentStep``), which meant the PII notice only stayed visible for
+    // the ~1-2s the AI spinner was running for "complete" answers before
+    // being wiped. The backend strips PII on every save, so this is purely
+    // informational and never blocks.
+    if (currentQuestion.type === "open" && ans.value.trim().length > 0) {
+      const piiMatches = detectPii(ans.value);
+      if (piiMatches.length > 0) {
+        setPiiNotice(
+          `Your response contains personal information (${summarisePii(piiMatches)}). We'll remove it before saving on our end — you can keep going.`,
+        );
+      } else {
+        setPiiNotice("");
+      }
+    }
 
     // Run vagueness check whenever: open question, has text, not yet checked.
     // isVague is reset to undefined whenever the answer text changes, so editing
@@ -357,35 +413,96 @@ export default function SurveyPage() {
         // Single round-trip: vagueness + followups together
         const result = await api.checkWithFollowups(currentQuestion.text, ans.value);
 
-        if (result.is_irrelevant) {
-          setIrrelevantError("Your response does not seem to answer the question being asked. Please provide a relevant answer so we can continue.");
+        // Backend returns `error: true` when the AI call itself failed
+        // (timeout, rate limit, malformed JSON). Surface it so the user can
+        // retry rather than being silently pushed past a follow-up that
+        // never got the chance to load. See B1/B3 in plan.
+        if (result.error) {
+          setAiCheckError(
+            "We couldn't analyse your answer right now. Please try again, or continue to submit as-is."
+          );
           updateAnswer(currentQuestion.id, { isVague: undefined });
+          trackEvent("ai_check_failed", {
+            question_id: currentQuestion.id,
+            stage: "initial",
+          }, cohortId);
           setCheckingVagueness(false);
           return;
         }
 
-        if (result.is_vague && result.followups.length > 0) {
-          pendingFollowupsRef.current = result.followups;
+        // is_irrelevant used to block with a red "does not seem to answer"
+        // banner. We intentionally no longer block here: a re-recorded voice
+        // answer that the model misclassifies, or a PII-heavy answer that
+        // looks like "*** *** ***" after server-side stripping, should flow
+        // through the same paths as vague-with-followups or accept-as-is.
+        // Any PII notice has already been surfaced above via detectPii.
+
+        // Treat is_vague and is_irrelevant the same way from the
+        // follow-up perspective: both mean "we need another chance to
+        // hear more". The only reason to skip a follow-up is when the
+        // participant explicitly declined ("nothing", "not sure"),
+        // which the backend flags as declined=true.
+        const needsClarification =
+          (result.is_vague || result.is_irrelevant) && !result.declined;
+
+        if (needsClarification) {
+          // Use AI-generated follow-ups when they exist; otherwise drop
+          // in a single generic clarifier so the user isn't silently
+          // advanced past what they expected to be a chance to
+          // elaborate. This covers the case where the model classifies
+          // a re-recorded voice answer as is_irrelevant (no follow-ups
+          // generated per prompt rules) — the user expects the same
+          // clarification prompt they got the first time.
+          const aiFollowups = result.followups;
+          const followups = aiFollowups.length > 0
+            ? aiFollowups
+            : ["Could you share a bit more detail about what you mean — a specific example, outcome, or challenge?"];
+
+          pendingFollowupsRef.current = followups;
           updateAnswer(currentQuestion.id, {
             isVague: true,
             missingInfoTypes: result.missing_info_types,
-            followups: result.followups,
+            followups,
           });
           setShowFollowups(true);
           setCheckingVagueness(false);
-          trackEvent("followup_triggered", {
-            question_id: currentQuestion.id,
-            num_followups: result.followups.length,
-          }, cohortId);
+          trackEvent(
+            "followup_triggered",
+            {
+              question_id: currentQuestion.id,
+              num_followups: followups.length,
+              source: aiFollowups.length > 0 ? "ai" : "fallback_irrelevant",
+            },
+            cohortId,
+          );
           return;
         }
 
+        // Declined or complete — accept as-is and fall through to
+        // advanceToNext(). Preserve the "needs clarification" signal for
+        // review/analytics by folding is_irrelevant into isVague: a user
+        // who declined after an irrelevant classification still had an
+        // answer the model couldn't make sense of, and the review page
+        // should reflect that.
         updateAnswer(currentQuestion.id, {
-          isVague: result.is_vague,
+          isVague: Boolean(result.is_vague || result.is_irrelevant),
           missingInfoTypes: result.missing_info_types,
         });
-      } catch {
+      } catch (err) {
+        // Transport-level failure (network, 5xx). Don't silently advance —
+        // let the user see the issue and decide to retry.
+        setAiCheckError(
+          "Network hiccup while checking your answer. Tap Next again to retry, or continue."
+        );
+        trackEvent("ai_check_failed", {
+          question_id: currentQuestion.id,
+          stage: "initial",
+          error_message: err instanceof Error ? err.message.slice(0, 120) : "unknown",
+        }, cohortId);
+        // Mark as "checked" so a second Next click proceeds without looping.
         updateAnswer(currentQuestion.id, { isVague: false });
+        setCheckingVagueness(false);
+        return;
       }
       setCheckingVagueness(false);
     }
@@ -475,14 +592,45 @@ export default function SurveyPage() {
         followup_question: followupQuestion,
         followup_answer: followupAnswer,
       });
-      if (!result.is_vague || result.is_irrelevant) return null;
+      // `error: true` means the AI call failed (timeout / rate limit /
+      // malformed JSON). Surface it so the user can retry instead of
+      // silently losing their shot at a second follow-up — the main
+      // question path does the same via ``aiCheckError``.
+      if (result.error) {
+        setAiCheckError(
+          "We couldn't check if a second follow-up is needed. You can continue, or retry.",
+        );
+        trackEvent("ai_check_failed", {
+          question_id: currentQuestion.id,
+          stage: "followup",
+        }, cohortId);
+        return null;
+      }
+      // Align F2 gating with the main-question branch in ``handleNext``:
+      // treat ``is_irrelevant`` the same as ``is_vague`` and only bail
+      // out when the participant explicitly declined. Previously a PII-
+      // heavy or terse F1 answer that the model marked irrelevant
+      // silently suppressed F2.
+      if (result.declined) return null;
+      const needsClarification = result.is_vague || result.is_irrelevant;
+      if (!needsClarification) return null;
       return result.followups[0] ?? null;
-    } catch {
+    } catch (err) {
+      // Transport-level failure — don't fail silently, mirror the main
+      // question's "network hiccup" banner.
+      setAiCheckError(
+        "Network hiccup while checking for a second follow-up. You can continue, or retry.",
+      );
+      trackEvent("ai_check_failed", {
+        question_id: currentQuestion.id,
+        stage: "followup",
+        error_message: err instanceof Error ? err.message.slice(0, 120) : "unknown",
+      }, cohortId);
       return null;
     } finally {
       setCheckingFollowupVagueness(false);
     }
-  }, [currentQuestion]);
+  }, [currentQuestion, cohortId]);
 
   const handlePrev = () => {
     if (currentStep > 0) {
@@ -703,6 +851,38 @@ export default function SurveyPage() {
           </div>
         )}
 
+        {aiCheckError && (
+          <div className="max-w-3xl mx-auto bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-3">
+            <span className="text-amber-600 text-lg shrink-0">!</span>
+            <div>
+              <p className="text-sm text-amber-700">{aiCheckError}</p>
+              <button
+                type="button"
+                onClick={() => setAiCheckError("")}
+                className="text-xs text-amber-500 hover:text-amber-700 mt-1 underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
+        {piiNotice && (
+          <div className="max-w-3xl mx-auto bg-brand-red/5 border border-brand-red/20 rounded-xl px-4 py-3 flex items-start gap-3">
+            <span className="text-brand-red text-lg shrink-0">!</span>
+            <div>
+              <p className="text-sm text-brand-red/80">{piiNotice}</p>
+              <button
+                type="button"
+                onClick={() => setPiiNotice("")}
+                className="text-xs text-brand-red/50 hover:text-brand-red/80 mt-1 underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-between max-w-3xl mx-auto">
           <Button
             variant="outline"
@@ -716,18 +896,20 @@ export default function SurveyPage() {
 
           <Button
             onClick={handleNext}
-            disabled={!isCurrentValid() || saving || checkingVagueness}
+            // B4: also block Next while the F2 follow-up vagueness check is
+            // in flight so users can't escape mid-evaluation.
+            disabled={!isCurrentValid() || saving || checkingVagueness || checkingFollowupVagueness}
             className="gap-2 bg-brand-blue hover:bg-brand-blue/90 shadow-sm"
           >
-            {checkingVagueness && <Loader2 className="h-4 w-4 animate-spin" />}
-            {checkingVagueness
+            {(checkingVagueness || checkingFollowupVagueness) && <Loader2 className="h-4 w-4 animate-spin" />}
+            {checkingVagueness || checkingFollowupVagueness
               ? "Analyzing..."
               : editReturnMode
                 ? "Back to Review"
                 : currentStep === visibleQuestions.length - 1
                   ? "Review"
                   : "Next"}
-            {!checkingVagueness && <ChevronRight className="h-4 w-4" />}
+            {!(checkingVagueness || checkingFollowupVagueness) && <ChevronRight className="h-4 w-4" />}
           </Button>
         </div>
       </div>

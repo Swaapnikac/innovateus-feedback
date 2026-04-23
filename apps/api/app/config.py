@@ -19,11 +19,12 @@ class Settings(BaseSettings):
     jotform_form_id: str = ""
     jotform_api_url: str = "https://api.jotform.com"
     # OpenAI Models
-    openai_model_vagueness: str = "gpt-4.1-nano"
-    openai_model_followups: str = "gpt-4.1-mini"
-    openai_model_extraction: str = "gpt-4.1"
-    openai_model_cleanup: str = "gpt-4.1-nano"
-    openai_model_transcription: str = "whisper-1"
+    openai_model_vagueness: str = "gpt-5"
+    openai_model_followups: str = "gpt-5"
+    openai_model_extraction: str = "gpt-5"
+    openai_model_cleanup: str = "gpt-5"
+    openai_model_pii: str = "gpt-5-mini"
+    openai_model_transcription: str = "gpt-4o-transcribe"
     # App
     cors_origins: str = "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003"
     environment: str = "development"

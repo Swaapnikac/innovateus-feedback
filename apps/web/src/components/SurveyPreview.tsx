@@ -17,6 +17,7 @@ import { YesNoQuestion } from "@/components/YesNoQuestion";
 import { DropdownQuestion, ShortTextQuestion, DateQuestion } from "@/components/SimpleQuestions";
 import { Textarea } from "@/components/ui/textarea";
 import type { SurveyQuestion, QuestionGroup } from "@/lib/api";
+import { MAX_ANSWER_CHARS } from "@/lib/limits";
 
 interface SurveyPreviewProps {
   title: string;
@@ -135,10 +136,10 @@ export function SurveyPreview({ title, questions, questionGroups }: SurveyPrevie
             <div className="space-y-2">
               <Textarea
                 value={ans.value}
-                onChange={(e) => setValue(e.target.value.slice(0, 5000))}
+                onChange={(e) => setValue(e.target.value.slice(0, MAX_ANSWER_CHARS))}
                 placeholder="Participant can type or speak here..."
                 className="min-h-[100px] resize-y text-base"
-                maxLength={5000}
+                maxLength={MAX_ANSWER_CHARS}
               />
               {current.voice_eligible && (
                 <p className="text-[11px] text-brand-blue/40 italic">

@@ -50,6 +50,7 @@ class StartSubmissionResponse(BaseModel):
 class AnswerRequest(BaseModel):
     question_id: str
     question_type: str
+    question_text: Optional[str] = Field(None, max_length=1000)
     answer_raw: Optional[str] = Field(None, max_length=5000)
     input_mode: str = "none"
     transcript: Optional[str] = Field(None, max_length=5000)
@@ -91,6 +92,8 @@ class VaguenessResponse(BaseModel):
     is_irrelevant: bool = False
     reason: str
     missing_info_types: list[str]
+    vagueness_score: Optional[float] = None
+    error: bool = False
 
 
 class FollowUpRequest(BaseModel):
@@ -109,6 +112,9 @@ class VaguenessWithFollowupsResponse(BaseModel):
     reason: str
     missing_info_types: list[str]
     followups: list[str]
+    vagueness_score: Optional[float] = None
+    declined: bool = False
+    error: bool = False
 
 
 class FollowUpCheckRequest(BaseModel):
@@ -149,6 +155,8 @@ class ExtractionResponse(BaseModel):
 
 class TranscriptResponse(BaseModel):
     transcript: str
+    pii_redaction_applied: bool = False
+    pii_redaction_categories: list[str] = []
 
 
 class AdminLoginRequest(BaseModel):

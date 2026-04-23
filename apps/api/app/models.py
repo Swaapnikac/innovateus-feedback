@@ -126,7 +126,9 @@ class Submission(Base):
 
     # ── Governance ──
     pii_detected_flag: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True, default=False)
-    pii_redaction_applied_flag: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True, default=True)
+    pii_redaction_applied_flag: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True, default=False)
+    pii_redaction_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    pii_redaction_categories: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     privacy_notice_version: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default="1.0")
     records_retention_tag: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, default="standard")
 

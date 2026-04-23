@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { MessageCircle, SkipForward, Mic, Type, Pencil, Loader2 } from "lucide-react";
 import { VoiceRecorder } from "./VoiceRecorder";
+import { PiiWarning } from "./PiiWarning";
 import { trackInputModeSwitched } from "@/lib/analytics";
+import { MAX_ANSWER_CHARS } from "@/lib/limits";
 
 interface FollowUpPanelProps {
   followups: string[];
@@ -66,6 +68,16 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
   // followups list can grow if vagueness check adds a 2nd follow-up
   const [followups, setFollowups] = useState<string[]>(initialFollowups);
   const [answers, setAnswers] = useState<Record<number, string>>(initialMap);
+  // Indices that have been explicitly submitted by the user (via Next/Done or
+  // Skip), or that were already answered when the panel mounted. This is how
+  // we tell a *fresh* voice transcription that has just populated answers[i]
+  // (button should read "Next"/"Done") from a *re-edit* of an already-
+  // submitted follow-up (button should read "Save" and skip the vagueness
+  // check). Without this distinction, voice answers on follow-up 1 would land
+  // on the Save path and never trigger the follow-up 2 check.
+  const [committedIndices, setCommittedIndices] = useState<Set<number>>(
+    () => new Set(Object.keys(initialMap).map(Number)),
+  );
 
   // Which index is active. Start at first unanswered, or null if all answered.
   const firstUnanswered = initialFollowups.findIndex((_, i) => !initialMap[i]);
@@ -74,22 +86,32 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
   );
   const [inputMode, setInputMode] = useState<"text" | "voice">("voice");
 
-  // Expose current answers to parent so it can flush unsaved typed text on Next click
+  // Expose current answers to parent so it can flush unsaved typed text on Next click.
+  // B8: preserve empty strings so that a cleared follow-up answer propagates
+  // to the parent (and to sessionStorage) instead of being lost.
   useImperativeHandle(ref, () => ({
     getCurrentAnswers: () => ({
-      followup_1_answer: answers[0] || undefined,
-      followup_2_answer: answers[1] || undefined,
+      followup_1_answer: 0 in answers ? answers[0] : undefined,
+      followup_2_answer: 1 in answers ? answers[1] : undefined,
     }),
   }));
 
   const buildAnswerPayload = (updatedAnswers: Record<number, string>) => ({
-    followup_1_answer: updatedAnswers[0] || undefined,
-    followup_2_answer: updatedAnswers[1] || undefined,
+    followup_1_answer: 0 in updatedAnswers ? updatedAnswers[0] : undefined,
+    followup_2_answer: 1 in updatedAnswers ? updatedAnswers[1] : undefined,
   });
 
   const saveAndAdvance = async (savedAnswers: Record<number, string>, idx: number) => {
     // Save immediately to the backend via parent callback
     onAnswerSaved(buildAnswerPayload(savedAnswers));
+    // Mark this slot as committed so a subsequent re-open via Edit falls
+    // into the Save path instead of re-running the vagueness check.
+    setCommittedIndices((prev) => {
+      if (prev.has(idx)) return prev;
+      const next = new Set(prev);
+      next.add(idx);
+      return next;
+    });
 
     const isLast = idx >= followups.length - 1;
 
@@ -139,8 +161,11 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
 
   const handleTranscriptComplete = (transcript: string) => {
     if (activeIndex === null) return;
+    // Keep the Type/Voice toggle on Voice after confirm — the VoiceRecorder
+    // stays mounted in its confirmed state so the participant can still
+    // tweak the transcript there, and the panel-level Next button below
+    // picks up the newly populated answers[activeIndex].
     setAnswers((prev) => ({ ...prev, [activeIndex]: transcript }));
-    setInputMode("text");
   };
 
   const handleEdit = (i: number) => {
@@ -160,7 +185,7 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
 
   if (editMode) {
     const handleEditModeChange = (idx: number, value: string) => {
-      const updated = { ...answers, [idx]: value.slice(0, 5000) };
+      const updated = { ...answers, [idx]: value.slice(0, MAX_ANSWER_CHARS) };
       setAnswers(updated);
       // Auto-save to parent on every change so "Back to Review" picks up edits
       onAnswerSaved(buildAnswerPayload(updated));
@@ -215,24 +240,28 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
               </div>
 
               {mode === "text" ? (
-                <div className="space-y-1">
+                <div className="space-y-2">
                   <Textarea
                     value={answers[i] || ""}
                     onChange={(e) => handleEditModeChange(i, e.target.value)}
                     placeholder="Type your response (optional)..."
                     className="min-h-[80px] resize-y text-sm"
-                    maxLength={5000}
+                    maxLength={MAX_ANSWER_CHARS}
                   />
-                  <p className={`text-xs text-right ${(answers[i]?.length || 0) >= 4900 ? "text-brand-red" : "text-brand-blue/40"}`}>
-                    {answers[i]?.length || 0}/5000
+                  <PiiWarning text={answers[i] || ""} />
+                  <p className={`text-xs text-right ${(answers[i]?.length || 0) >= MAX_ANSWER_CHARS - 20 ? "text-brand-red" : "text-brand-blue/40"}`}>
+                    {answers[i]?.length || 0}/{MAX_ANSWER_CHARS}
                   </p>
                 </div>
               ) : (
-              <VoiceRecorder
-                onTranscriptComplete={(transcript) => handleEditModeTranscript(i, transcript)}
-                initialTranscript={answers[i] || ""}
-                questionId={followupQid(i)}
-              />
+                <div className="space-y-2">
+                  <VoiceRecorder
+                    onTranscriptComplete={(transcript) => handleEditModeTranscript(i, transcript)}
+                    initialTranscript={answers[i] || ""}
+                    questionId={followupQid(i)}
+                  />
+                  <PiiWarning text={answers[i] || ""} />
+                </div>
               )}
             </div>
           );
@@ -286,9 +315,13 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
           );
         }
 
-        // Active input
-        const isEditingExisting = answered !== undefined || initialMap[i] !== undefined;
-        const isLastFollowup = i >= followups.length - 1;
+        // Active input. Only treat as "editing existing" when this index has
+        // actually been submitted before (or was pre-populated on mount) —
+        // not just because ``answers[i]`` was populated by an in-flight
+        // voice transcription. That distinction is what keeps the button as
+        // "Next" on a fresh voice answer, which in turn lets
+        // ``saveAndAdvance`` run the follow-up-2 vagueness check.
+        const isEditingExisting = committedIndices.has(i);
 
         return (
           <div key={i} className="space-y-3">
@@ -318,26 +351,30 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
             </div>
 
             {inputMode === "text" ? (
-              <div className="space-y-1">
+              <div className="space-y-2">
                 <Textarea
                   value={answers[i] || ""}
                   onChange={(e) =>
-                    setAnswers((prev) => ({ ...prev, [i]: e.target.value.slice(0, 5000) }))
+                    setAnswers((prev) => ({ ...prev, [i]: e.target.value.slice(0, MAX_ANSWER_CHARS) }))
                   }
                   placeholder="Type your response (optional)..."
                   className="min-h-[80px] resize-y"
-                  maxLength={5000}
+                  maxLength={MAX_ANSWER_CHARS}
                 />
-                <p className={`text-xs text-right ${(answers[i]?.length || 0) >= 4900 ? "text-brand-red" : "text-brand-blue/40"}`}>
-                  {answers[i]?.length || 0}/5000
+                <PiiWarning text={answers[i] || ""} />
+                <p className={`text-xs text-right ${(answers[i]?.length || 0) >= MAX_ANSWER_CHARS - 20 ? "text-brand-red" : "text-brand-blue/40"}`}>
+                  {answers[i]?.length || 0}/{MAX_ANSWER_CHARS}
                 </p>
               </div>
             ) : (
-              <VoiceRecorder
-                onTranscriptComplete={handleTranscriptComplete}
-                initialTranscript={answers[i] || ""}
-                questionId={followupQid(i)}
-              />
+              <div className="space-y-2">
+                <VoiceRecorder
+                  onTranscriptComplete={handleTranscriptComplete}
+                  initialTranscript={answers[i] || ""}
+                  questionId={followupQid(i)}
+                />
+                <PiiWarning text={answers[i] || ""} />
+              </div>
             )}
 
             <div className="flex gap-2 justify-end">
@@ -362,7 +399,7 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
                 className="bg-brand-blue hover:bg-brand-blue/90 gap-1.5"
               >
                 {checkingVagueness && i === 0 && <Loader2 className="h-3 w-3 animate-spin" />}
-                {isEditingExisting ? "Save" : isLastFollowup ? "Done" : "Next"}
+                {isEditingExisting ? "Save" : "Next"}
               </Button>
             </div>
           </div>

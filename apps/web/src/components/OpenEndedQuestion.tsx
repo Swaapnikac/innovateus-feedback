@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Mic, Type } from "lucide-react";
-import { VoiceRecorder } from "./VoiceRecorder";
+import { VoiceRecorder, type VoiceRecorderHandle } from "./VoiceRecorder";
+import { PiiWarning } from "./PiiWarning";
+import { MAX_ANSWER_CHARS } from "@/lib/limits";
 
 interface OpenEndedQuestionProps {
   value: string;
@@ -31,7 +33,18 @@ export function OpenEndedQuestion({
     initialInputMode ?? (voiceEligible ? "voice" : "text")
   );
 
+  const voiceRef = useRef<VoiceRecorderHandle>(null);
+
   const handleModeSwitch = (mode: "text" | "voice") => {
+    // B7: when switching voice → text, pull whatever transcript the recorder
+    // is holding (confirmed, enhanced, raw, or mid-recording live) before it
+    // unmounts, so in-flight voice work is preserved in the text area.
+    if (inputMode === "voice" && mode === "text" && voiceRef.current) {
+      const pending = voiceRef.current.flushCurrentTranscript();
+      if (pending && pending.trim() && !value.trim()) {
+        onChange(pending.slice(0, MAX_ANSWER_CHARS));
+      }
+    }
     setInputMode(mode);
     onInputModeChange?.(mode);
   };
@@ -69,25 +82,30 @@ export function OpenEndedQuestion({
       )}
 
       {inputMode === "text" ? (
-        <div className="space-y-1">
+        <div className="space-y-2">
           <Textarea
             value={value}
-            onChange={(e) => onChange(e.target.value.slice(0, 5000))}
+            onChange={(e) => onChange(e.target.value.slice(0, MAX_ANSWER_CHARS))}
             placeholder="Type your response here..."
             className="min-h-[120px] resize-y text-base"
-            maxLength={5000}
+            maxLength={MAX_ANSWER_CHARS}
           />
-          <p className={`text-xs text-right ${value.length >= 4900 ? "text-brand-red" : "text-brand-blue/40"}`}>
-            {value.length}/5000
+          <PiiWarning text={value} />
+          <p className={`text-xs text-right ${value.length >= MAX_ANSWER_CHARS - 20 ? "text-brand-red" : "text-brand-blue/40"}`}>
+            {value.length}/{MAX_ANSWER_CHARS}
           </p>
         </div>
       ) : (
-        <VoiceRecorder
-          onTranscriptComplete={handleTranscriptComplete}
-          initialTranscript={value}
-          onRecordingStarted={onRecordingStarted}
-          questionId={questionId}
-        />
+        <div className="space-y-2">
+          <VoiceRecorder
+            ref={voiceRef}
+            onTranscriptComplete={handleTranscriptComplete}
+            initialTranscript={value}
+            onRecordingStarted={onRecordingStarted}
+            questionId={questionId}
+          />
+          <PiiWarning text={value} />
+        </div>
       )}
     </div>
   );

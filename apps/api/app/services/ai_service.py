@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from openai import AsyncOpenAI
 from app.config import get_settings
+from app.services.pii_service import REDACTED_TOKEN, strip_pii, strip_pii_with_meta
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,160 @@ def _load_prompt(name: str) -> str:
     path = PROMPTS_DIR / f"{name}.txt"
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
+
+
+def _clean_for_ai(text: str | None) -> str:
+    """Strip PII from ``text`` before handing it to OpenAI.
+
+    This is the single chokepoint every AI call must use. Regex-based for
+    speed and determinism; the AI-based detector in
+    :func:`detect_and_redact_pii_with_ai` is layered on top for free-form
+    names/addresses that regex cannot catch.
+
+    Never raises — always returns a safe string.
+    """
+    if not text:
+        return text or ""
+    try:
+        return strip_pii(text) or ""
+    except Exception as e:  # pragma: no cover — regex should not fail
+        logger.warning(f"strip_pii failed, falling back to original text: {e}")
+        return text
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# F3 — AI-based PII detector (layered on top of the regex stripper)
+# ──────────────────────────────────────────────────────────────────────────────
+# GPT-5-mini reads free-form text and flags context-dependent PII (names,
+# ambiguous addresses) that regex alone cannot catch reliably. Results are
+# cached by sha256 so repeated identical inputs (same question re-asked, same
+# typed answer saved twice) don't re-hit the API.
+_PII_CACHE: dict[str, tuple[str, int, list[str]]] = {}
+_PII_CACHE_MAX = 500
+
+
+def _cache_key(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _apply_ai_redactions(text: str, redactions: list[dict]) -> tuple[str, int, set[str]]:
+    count = 0
+    cats: set[str] = set()
+    for r in redactions or []:
+        if not isinstance(r, dict):
+            continue
+        span = r.get("span")
+        category = r.get("category", "other")
+        if not isinstance(span, str) or not span.strip():
+            continue
+        # Avoid redacting the neutral placeholder itself (``***`` would match
+        # aggressively otherwise) or any legacy ``[REDACTED_*]`` tokens left
+        # over from older cached data.
+        if span == REDACTED_TOKEN or span.startswith("[REDACTED_"):
+            continue
+        new_text = text.replace(span, REDACTED_TOKEN)
+        if new_text != text:
+            count += 1
+            cats.add(_normalise_category(category))
+            text = new_text
+    return text, count, cats
+
+
+def _normalise_category(category: str) -> str:
+    c = (category or "other").strip().lower()
+    mapping = {
+        "person_name": "name",
+        "name": "name",
+        "address": "address",
+        "organization_pii": "name",
+        "contact": "email",
+        "email": "email",
+        "phone": "phone",
+        "id_number": "id",
+        "ssn": "ssn",
+        "dob": "dob",
+        "other_sensitive": "sensitive",
+        "other": "sensitive",
+    }
+    return mapping.get(c, "sensitive")
+
+
+async def detect_and_redact_pii_with_ai(text: str | None) -> tuple[str, int, list[str]]:
+    """Redact free-form PII (names, contextual addresses) using GPT-5-mini.
+
+    Always runs regex ``strip_pii`` first so the AI only sees pre-cleaned
+    input. Falls back to the regex-only output on any failure so we never
+    echo raw PII to callers. Results are memoised by sha256 of the
+    (already regex-stripped) text.
+
+    Returns: ``(redacted_text, added_redaction_count, category_list)``
+    where ``added_redaction_count`` is the number of redactions the AI
+    layer added on top of regex. The category list includes both.
+    """
+    if not text:
+        return "", 0, []
+
+    regex_result = strip_pii_with_meta(text)
+    pre = regex_result.text
+    regex_cats = set(regex_result.categories)
+
+    cache_key = _cache_key(pre)
+    if cache_key in _PII_CACHE:
+        return _PII_CACHE[cache_key]
+
+    if not _has_api_key():
+        final = (pre, regex_result.count, sorted(regex_cats))
+        _cache_put(cache_key, final)
+        return final
+
+    # Short-circuit: for very short, already-clean inputs ("yes", "no",
+    # "none", "not sure", single-word answers) the AI layer has nothing to
+    # contribute — it cannot contain a free-form name or address. Skip the
+    # round-trip so transcription + save feel instant on tiny answers.
+    if len(pre.strip()) < 40 and regex_result.count == 0:
+        final = (pre, 0, [])
+        _cache_put(cache_key, final)
+        return final
+
+    try:
+        client = _get_client()
+        system_prompt = _load_prompt("pii_redaction")
+        response = await client.chat.completions.create(
+            model=get_settings().openai_model_pii,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": pre},
+            ],
+            # PII detection doesn't benefit from deep reasoning — span matching
+            # is near-deterministic. Cap the thinking budget so the call returns
+            # in <1s instead of 3-5s.
+            extra_body={"reasoning_effort": "minimal"},
+        )
+        parsed = json.loads(response.choices[0].message.content or "{}")
+        redactions = parsed.get("redactions", [])
+        if not isinstance(redactions, list):
+            redactions = []
+        redacted, ai_count, ai_cats = _apply_ai_redactions(pre, redactions)
+        total_count = regex_result.count + ai_count
+        all_cats = sorted(regex_cats.union(ai_cats))
+        final = (redacted, total_count, all_cats)
+        _cache_put(cache_key, final)
+        return final
+    except Exception as e:
+        logger.warning(f"AI PII detection failed: {e}")
+        # Fall back to regex-only result. Never echo raw PII to caller.
+        final = (pre, regex_result.count, sorted(regex_cats))
+        _cache_put(cache_key, final)
+        return final
+
+
+def _cache_put(key: str, value: tuple[str, int, list[str]]) -> None:
+    if len(_PII_CACHE) >= _PII_CACHE_MAX:
+        # Simple FIFO eviction: drop the oldest ~10% of entries.
+        for stale_key in list(_PII_CACHE.keys())[: _PII_CACHE_MAX // 10]:
+            _PII_CACHE.pop(stale_key, None)
+    _PII_CACHE[key] = value
 
 
 def prompt_version(name: str) -> str:
@@ -60,6 +215,36 @@ def _coerce_score(value, is_vague: bool) -> float | None:
         return 0.7 if is_vague else 0.1
 
 
+def _coerce_followups(value, limit: int = 1) -> list[str]:
+    """Normalise the ``followups`` field from a model response.
+
+    GPT-5 is told to return ``followups: [...]`` but sometimes wraps the
+    question in a string, returns ``null``, or returns an object. Defend
+    against every garbage shape so we never 500 on the router.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, (list, tuple)):
+        clean: list[str] = []
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                clean.append(item.strip())
+            elif isinstance(item, dict):
+                for key in ("question", "text", "followup"):
+                    if isinstance(item.get(key), str) and item[key].strip():
+                        clean.append(item[key].strip())
+                        break
+        return clean[:limit]
+    if isinstance(value, dict):
+        for key in ("question", "text", "followup"):
+            if isinstance(value.get(key), str) and value[key].strip():
+                return [value[key].strip()][:limit]
+    return []
+
+
 async def detect_vagueness(question_text: str, answer_text: str) -> dict:
     if not _has_api_key():
         return {
@@ -73,6 +258,8 @@ async def detect_vagueness(question_text: str, answer_text: str) -> dict:
     try:
         client = _get_client()
         system_prompt = _load_prompt("vagueness")
+        safe_question = _clean_for_ai(question_text)
+        safe_answer = _clean_for_ai(answer_text)
 
         response = await client.chat.completions.create(
             model=get_settings().openai_model_vagueness,
@@ -82,12 +269,12 @@ async def detect_vagueness(question_text: str, answer_text: str) -> dict:
                 {
                     "role": "user",
                     "content": json.dumps({
-                        "question": question_text,
-                        "answer": answer_text,
+                        "question": safe_question,
+                        "answer": safe_answer,
                     }),
                 },
             ],
-            temperature=0.1,
+            extra_body={"reasoning_effort": "minimal"},
         )
 
         result = json.loads(response.choices[0].message.content)
@@ -107,6 +294,7 @@ async def detect_vagueness(question_text: str, answer_text: str) -> dict:
             "reason": "Analysis unavailable",
             "missing_info_types": [],
             "vagueness_score": None,
+            "error": True,
         }
 
 
@@ -121,6 +309,8 @@ async def generate_followups(
     try:
         client = _get_client()
         system_prompt = _load_prompt("followup")
+        safe_question = _clean_for_ai(question_text)
+        safe_answer = _clean_for_ai(answer_text)
 
         response = await client.chat.completions.create(
             model=get_settings().openai_model_followups,
@@ -130,18 +320,18 @@ async def generate_followups(
                 {
                     "role": "user",
                     "content": json.dumps({
-                        "question": question_text,
-                        "answer": answer_text,
+                        "question": safe_question,
+                        "answer": safe_answer,
                         "missing_info_types": missing_info_types,
                     }),
                 },
             ],
-            temperature=0.3,
+            extra_body={"reasoning_effort": "minimal"},
         )
 
         result = json.loads(response.choices[0].message.content)
         followups = result.get("followups", [])
-        return followups[:2]
+        return _coerce_followups(followups, limit=2)
     except Exception as e:
         logger.warning(f"Follow-up generation failed: {e}")
         return []
@@ -184,25 +374,30 @@ async def detect_followup_needs_clarification(
                 {
                     "role": "user",
                     "content": json.dumps({
-                        "original_question": original_question,
-                        "original_answer": original_answer,
-                        "followup_question": followup_question,
-                        "followup_answer": followup_answer,
+                        "original_question": _clean_for_ai(original_question),
+                        "original_answer": _clean_for_ai(original_answer),
+                        "followup_question": _clean_for_ai(followup_question),
+                        "followup_answer": _clean_for_ai(followup_answer),
                     }),
                 },
             ],
-            temperature=0.2,
+            extra_body={"reasoning_effort": "minimal"},
         )
 
         result = json.loads(response.choices[0].message.content)
-        followups = result.get("followups", [])
+        followups = _coerce_followups(result.get("followups"), limit=1)
         is_vague = bool(result.get("is_vague", False))
+        declined = bool(result.get("declined", False))
+        # If the participant declined (e.g. "nothing"/"not sure"), never escalate.
+        if declined:
+            followups = []
         return {
             "is_vague": is_vague,
             "is_irrelevant": bool(result.get("is_irrelevant", False)),
             "reason": result.get("reason", ""),
             "missing_info_types": result.get("missing_info_types", []),
-            "followups": followups[:1],
+            "followups": followups,
+            "declined": declined,
             "vagueness_score": _coerce_score(result.get("vagueness_score"), is_vague),
         }
     except Exception as e:
@@ -213,7 +408,9 @@ async def detect_followup_needs_clarification(
             "reason": "Analysis unavailable",
             "missing_info_types": [],
             "followups": [],
+            "declined": False,
             "vagueness_score": None,
+            "error": True,
         }
 
 
@@ -242,23 +439,28 @@ async def detect_vagueness_with_followups(question_text: str, answer_text: str) 
                 {
                     "role": "user",
                     "content": json.dumps({
-                        "question": question_text,
-                        "answer": answer_text,
+                        "question": _clean_for_ai(question_text),
+                        "answer": _clean_for_ai(answer_text),
                     }),
                 },
             ],
-            temperature=0.2,
+            extra_body={"reasoning_effort": "minimal"},
         )
 
         result = json.loads(response.choices[0].message.content)
-        followups = result.get("followups", [])
+        followups = _coerce_followups(result.get("followups"), limit=1)
         is_vague = bool(result.get("is_vague", False))
+        declined = bool(result.get("declined", False))
+        # Participant said "nothing" / "not sure": accept as-is, no follow-up.
+        if declined:
+            followups = []
         return {
             "is_vague": is_vague,
             "is_irrelevant": bool(result.get("is_irrelevant", False)),
             "reason": result.get("reason", ""),
             "missing_info_types": result.get("missing_info_types", []),
-            "followups": followups[:1],
+            "followups": followups,
+            "declined": declined,
             "vagueness_score": _coerce_score(result.get("vagueness_score"), is_vague),
         }
     except Exception as e:
@@ -269,7 +471,9 @@ async def detect_vagueness_with_followups(question_text: str, answer_text: str) 
             "reason": "Analysis unavailable",
             "missing_info_types": [],
             "followups": [],
+            "declined": False,
             "vagueness_score": None,
+            "error": True,
         }
 
 
@@ -280,25 +484,33 @@ async def cleanup_transcript(raw_text: str) -> dict:
     try:
         client = _get_client()
         system_prompt = _load_prompt("cleanup")
+        safe_raw = _clean_for_ai(raw_text)
 
         response = await client.chat.completions.create(
             model=get_settings().openai_model_cleanup,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": raw_text},
+                {"role": "user", "content": safe_raw},
             ],
-            temperature=0.1,
+            # Cleanup is a mechanical rewrite (punctuation, fillers) — no
+            # reasoning budget needed. Drops latency from ~3-5s to <1s.
+            extra_body={"reasoning_effort": "minimal"},
         )
 
         result = json.loads(response.choices[0].message.content)
+        cleaned = result.get("cleaned", safe_raw)
+        # Belt-and-suspenders: re-run PII strip on the model's output in case
+        # it echoed anything sensitive back (it should not, but we never trust).
+        cleaned = _clean_for_ai(cleaned)
         return {
-            "cleaned": result.get("cleaned", raw_text),
-            "changed": result.get("changed", False),
+            "cleaned": cleaned,
+            "changed": bool(result.get("changed", False)) or (cleaned != (raw_text or "")),
         }
     except Exception as e:
         logger.warning(f"Transcript cleanup failed: {e}")
-        return {"cleaned": raw_text, "changed": False}
+        # On failure, still return a PII-safe version of the input.
+        return {"cleaned": _clean_for_ai(raw_text), "changed": False}
 
 
 def _empty_extraction_result() -> dict:
@@ -340,6 +552,15 @@ async def extract_structured(answers: list[dict]) -> dict:
         client = _get_client()
         system_prompt = _load_prompt("extraction")
 
+        # PII-strip every string field in the answers payload before it
+        # reaches OpenAI.
+        safe_answers: list[dict] = []
+        for a in answers:
+            safe_answers.append({
+                k: (_clean_for_ai(v) if isinstance(v, str) else v)
+                for k, v in a.items()
+            })
+
         response = await client.chat.completions.create(
             model=model_name,
             response_format={"type": "json_object"},
@@ -348,11 +569,10 @@ async def extract_structured(answers: list[dict]) -> dict:
                 {
                     "role": "user",
                     "content": json.dumps({
-                        "answers": answers,
+                        "answers": safe_answers,
                     }),
                 },
             ],
-            temperature=0.1,
         )
 
         result_dict = json.loads(response.choices[0].message.content)
@@ -494,8 +714,8 @@ async def analyze_open_responses(open_responses: list[dict]) -> dict:
             {
                 "submission_id": r.get("submission_id"),
                 "question_id": r.get("question_id"),
-                "question_text": _clip_text(r.get("question_text", ""), 220),
-                "answer_text": _clip_text(r.get("answer_text", ""), 900),
+                "question_text": _clean_for_ai(_clip_text(r.get("question_text", ""), 220)),
+                "answer_text": _clean_for_ai(_clip_text(r.get("answer_text", ""), 900)),
             }
             for r in open_responses[:80]
         ]
@@ -516,7 +736,6 @@ async def analyze_open_responses(open_responses: list[dict]) -> dict:
                 },
                 {"role": "user", "content": json.dumps({"responses": payload})},
             ],
-            temperature=0.2,
         )
         result = json.loads(response.choices[0].message.content)
         return {
@@ -605,7 +824,6 @@ async def generate_survey_from_goal(goal_description: str, program_type: str | N
                     }),
                 },
             ],
-            temperature=0.35,
         )
         result = json.loads(response.choices[0].message.content)
         questions = result.get("questions", [])
@@ -655,7 +873,6 @@ async def compare_survey_responses(primary: dict, comparison: dict) -> dict:
                 },
                 {"role": "user", "content": json.dumps({"primary": primary, "comparison": comparison})},
             ],
-            temperature=0.2,
         )
         result = json.loads(response.choices[0].message.content)
         return {

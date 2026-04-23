@@ -167,10 +167,17 @@ export interface VaguenessResult {
   is_irrelevant: boolean;
   reason: string;
   missing_info_types: string[];
+  vagueness_score?: number | null;
+  /** True when the backend AI call failed and the response is a safe fallback
+   * (never silently advance the user when this is set). */
+  error?: boolean;
 }
 
 export interface FollowUpResult {
   followups: string[];
+  /** Set by /ai/check and /ai/check-followup when the user declined to
+   * elaborate (e.g. "nothing", "not sure"). No follow-up should be shown. */
+  declined?: boolean;
 }
 
 export interface UserTestingAnalytics {
@@ -376,15 +383,33 @@ export const api = {
       { method: "POST" }
     ),
 
-  transcribe: async (audioBlob: Blob): Promise<{ transcript: string }> => {
+  transcribe: async (
+    audioBlob: Blob,
+  ): Promise<{ transcript: string; pii_redaction_applied?: boolean; pii_redaction_categories?: string[] }> => {
     const formData = new FormData();
     formData.append("audio", audioBlob, "recording.webm");
-    const res = await fetch(`${API_URL}/v1/transcribe`, {
-      method: "POST",
-      body: formData,
-    });
-    if (!res.ok) throw new Error("Transcription failed");
-    return res.json();
+    // C6: hard timeout so a stuck upload (flaky wifi, backend slow) does
+    // not hang the recorder UI indefinitely. 30s is generous for Whisper.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const res = await fetch(`${API_URL}/v1/transcribe`, {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        throw new Error(`Transcription failed (${res.status})`);
+      }
+      return res.json();
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw new Error("Transcription timed out after 30 seconds");
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   },
 
   cleanupTranscript: (rawText: string) =>

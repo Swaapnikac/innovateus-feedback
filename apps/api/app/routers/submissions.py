@@ -16,8 +16,13 @@ from app.schemas import (
     ExperienceRatingRequest,
     ClientEnvRequest,
 )
-from app.services.ai_service import extract_structured, detect_vagueness
-from app.services.pii_service import strip_pii
+from app.services.ai_service import (
+    extract_structured,
+    detect_vagueness,
+    detect_followup_needs_clarification,
+    detect_and_redact_pii_with_ai,
+)
+from app.services.pii_service import strip_pii, strip_pii_with_meta
 from app.services.user_agent_service import parse_user_agent
 from app.config import get_settings
 
@@ -184,10 +189,29 @@ async def save_answer(submission_id: uuid.UUID, req: AnswerRequest, db: AsyncSes
     if not sub:
         raise HTTPException(status_code=404, detail="Submission not found")
 
-    answer_raw = strip_pii(req.answer_raw)
-    transcript = strip_pii(req.transcript)
-    followup_1_answer = strip_pii(req.followup_1_answer) if req.followup_1_answer else None
-    followup_2_answer = strip_pii(req.followup_2_answer) if req.followup_2_answer else None
+    # PII strip every user-facing string and track redactions on the submission
+    # so the governance dashboard reflects reality. The AI layer catches
+    # free-form PII (names, contextual addresses) that regex cannot; if it
+    # fails or there's no API key it silently falls back to regex-only.
+    _redaction_count = 0
+    _redaction_cats: set[str] = set()
+
+    async def _scrub(value: str | None) -> str | None:
+        nonlocal _redaction_count, _redaction_cats
+        if value is None:
+            return None
+        if not value.strip():
+            return value
+        redacted, count, cats = await detect_and_redact_pii_with_ai(value)
+        if count:
+            _redaction_count += count
+            _redaction_cats.update(cats)
+        return redacted
+
+    answer_raw = await _scrub(req.answer_raw)
+    transcript = await _scrub(req.transcript)
+    followup_1_answer = await _scrub(req.followup_1_answer) if req.followup_1_answer else None
+    followup_2_answer = await _scrub(req.followup_2_answer) if req.followup_2_answer else None
 
     now = datetime.now(timezone.utc)
     is_open = (req.question_type or "").lower() in _OPEN_TYPES
@@ -231,11 +255,12 @@ async def save_answer(submission_id: uuid.UUID, req: AnswerRequest, db: AsyncSes
         if previous_answer and previous_answer != (answer_raw or ""):
             existing.changed_answer_flag = True
         if req.transcript_raw is not None:
-            existing.transcript_raw = strip_pii(req.transcript_raw)
+            scrubbed_raw = await _scrub(req.transcript_raw)
+            existing.transcript_raw = scrubbed_raw
             existing.transcript_final = answer_raw
             if req.transcript_raw and answer_raw and req.transcript_raw != answer_raw:
                 existing.transcript_edit_distance = _levenshtein(
-                    strip_pii(req.transcript_raw) or "", answer_raw or ""
+                    scrubbed_raw or "", answer_raw or ""
                 )
                 existing.user_edited_transcript_flag = True
                 existing.edited_after_transcription_flag = True
@@ -282,27 +307,41 @@ async def save_answer(submission_id: uuid.UUID, req: AnswerRequest, db: AsyncSes
             followup_1_word_count=fu1_word_count,
             followup_2_word_count=fu2_word_count,
             answer_skipped=bool(req.answer_skipped),
-            transcript_raw=strip_pii(req.transcript_raw) if req.transcript_raw else None,
+            transcript_raw=await _scrub(req.transcript_raw) if req.transcript_raw else None,
             transcript_final=answer_raw if req.transcript_raw else None,
             voice_duration_sec=req.voice_duration_sec,
         )
         if req.transcript_raw and answer_raw and req.transcript_raw != answer_raw:
             answer.transcript_edit_distance = _levenshtein(
-                strip_pii(req.transcript_raw) or "", answer_raw or ""
+                (await _scrub(req.transcript_raw)) or "", answer_raw or ""
             )
             answer.user_edited_transcript_flag = True
             answer.edited_after_transcription_flag = True
         db.add(answer)
 
     # ── Vagueness tracking on the follow-up answers (H2 / S3) ──
-    # We only re-classify a follow-up answer when it changes and is non-empty.
+    # Use the context-aware ``detect_followup_needs_clarification`` so the
+    # server-side re-scoring matches the same judgement the UX layer applied
+    # when deciding whether to escalate to F2. If we re-used plain
+    # ``detect_vagueness`` here, ``final_response_specific_flag`` could
+    # disagree with what the participant actually experienced.
     try:
         if followup_1_answer:
-            fu1_result = await detect_vagueness(req.followup_1 or "", followup_1_answer)
+            fu1_result = await detect_followup_needs_clarification(
+                original_question=req.question_text or "",
+                original_answer=answer_raw or "",
+                followup_question=req.followup_1 or "",
+                followup_answer=followup_1_answer,
+            )
             answer.followup_1_is_vague = fu1_result.get("is_vague")
             answer.followup_1_vagueness_score = fu1_result.get("vagueness_score")
         if followup_2_answer:
-            fu2_result = await detect_vagueness(req.followup_2 or "", followup_2_answer)
+            fu2_result = await detect_followup_needs_clarification(
+                original_question=req.question_text or "",
+                original_answer=answer_raw or "",
+                followup_question=req.followup_2 or "",
+                followup_answer=followup_2_answer,
+            )
             answer.followup_2_is_vague = fu2_result.get("is_vague")
             answer.followup_2_vagueness_score = fu2_result.get("vagueness_score")
     except Exception as e:
@@ -340,6 +379,15 @@ async def save_answer(submission_id: uuid.UUID, req: AnswerRequest, db: AsyncSes
         sub.started_in_voice = req.input_mode == "voice"
     sub.ended_in_voice = req.input_mode == "voice"
     sub.last_activity_at = now
+
+    # ── PII redaction roll-up ──
+    if _redaction_count:
+        sub.pii_detected_flag = True
+        sub.pii_redaction_applied_flag = True
+        sub.pii_redaction_count = (sub.pii_redaction_count or 0) + _redaction_count
+        existing_cats = set(sub.pii_redaction_categories or [])
+        existing_cats.update(_redaction_cats)
+        sub.pii_redaction_categories = sorted(existing_cats)
 
     return AnswerResponse(id=answer_id, question_id=req.question_id)
 
