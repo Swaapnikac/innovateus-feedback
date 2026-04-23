@@ -17,7 +17,11 @@ export type PiiCategory =
   | "dob"
   | "ip"
   | "license"
-  | "account";
+  | "account"
+  | "name"
+  | "id"
+  | "zip"
+  | "sensitive";
 
 export interface PiiMatch {
   category: PiiCategory;
@@ -106,7 +110,7 @@ export function describeCategory(category: PiiCategory): string {
     case "credit_card":
       return "credit card number";
     case "address":
-      return "street address";
+      return "address";
     case "dob":
       return "date of birth";
     case "ip":
@@ -115,15 +119,59 @@ export function describeCategory(category: PiiCategory): string {
       return "driver's license";
     case "account":
       return "account number";
+    case "name":
+      return "name";
+    case "id":
+      return "identification number";
+    case "zip":
+      return "ZIP code";
+    case "sensitive":
+      return "sensitive personal information";
     default:
       return "personal information";
   }
+}
+
+/**
+ * Best-effort human label for any PII category, including strings emitted
+ * by the backend (``detect_and_redact_pii_with_ai``) that may not be in the
+ * client ``PiiCategory`` union yet. Falls back to "personal information"
+ * for unknown categories instead of leaking the raw enum value.
+ */
+export function describeCategoryLabel(category: string): string {
+  const known: Record<string, string> = {
+    ssn: "Social Security number",
+    email: "email address",
+    phone: "phone number",
+    credit_card: "credit card number",
+    address: "address",
+    dob: "date of birth",
+    ip: "IP address",
+    license: "driver's license",
+    account: "account number",
+    name: "name",
+    id: "identification number",
+    zip: "ZIP code",
+    sensitive: "sensitive personal information",
+  };
+  return known[category] ?? "personal information";
 }
 
 export function summarisePii(matches: PiiMatch[]): string {
   if (matches.length === 0) return "";
   const uniq = Array.from(new Set(matches.map((m) => m.category)));
   return uniq.map(describeCategory).join(", ");
+}
+
+/**
+ * Format a deduped list of category strings (possibly sourced from both
+ * client regex and backend AI) into a human-readable summary suitable for
+ * the banner. Uses ``describeCategoryLabel`` so unknown labels don't leak.
+ */
+export function summariseCategoryList(categories: string[]): string {
+  if (categories.length === 0) return "";
+  const uniq = Array.from(new Set(categories));
+  return uniq.map(describeCategoryLabel).join(", ");
 }
 
 // Backend uses "***" as the redaction placeholder (see REDACTED_TOKEN in

@@ -29,7 +29,7 @@ import {
   trackPageView,
   trackQuestionStarted,
 } from "@/lib/analytics";
-import { detectPii, summarisePii } from "@/lib/pii";
+import { detectPii, summarisePii, summariseCategoryList } from "@/lib/pii";
 
 interface AnswerState {
   value: string;
@@ -388,11 +388,25 @@ export default function SurveyPage() {
     // the ~1-2s the AI spinner was running for "complete" answers before
     // being wiped. The backend strips PII on every save, so this is purely
     // informational and never blocks.
+    // PII scan on Next: client regex first (catches obvious cases even if
+    // the backend is slow/down), then AI-backed check for names and soft
+    // addresses that regex can't reach. Merge the two category sets so the
+    // banner lists everything we'd scrub on save.
     if (currentQuestion.type === "open" && ans.value.trim().length > 0) {
-      const piiMatches = detectPii(ans.value);
-      if (piiMatches.length > 0) {
+      const localMatches = detectPii(ans.value);
+      const merged = new Set<string>(localMatches.map((m) => m.category));
+      try {
+        const remote = await api.checkPii(ans.value);
+        if (remote.found) {
+          for (const cat of remote.categories) merged.add(cat);
+        }
+      } catch {
+        // Transport / 5xx — fall back to client regex only. Do not block;
+        // the authoritative scrub still runs on save.
+      }
+      if (merged.size > 0) {
         setPiiNotice(
-          `Your response contains personal information (${summarisePii(piiMatches)}). We'll remove it before saving on our end — you can keep going.`,
+          `Your response contains personal information (${summariseCategoryList(Array.from(merged))}). We'll remove it before saving on our end — you can keep going.`,
         );
       } else {
         setPiiNotice("");

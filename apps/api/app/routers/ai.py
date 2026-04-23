@@ -5,6 +5,7 @@ from app.schemas import (
     VaguenessWithFollowupsResponse,
     FollowUpCheckRequest,
     CleanupRequest, CleanupResponse,
+    PiiCheckRequest, PiiCheckResponse,
 )
 from app.services.ai_service import (
     detect_vagueness,
@@ -12,6 +13,7 @@ from app.services.ai_service import (
     cleanup_transcript,
     detect_vagueness_with_followups,
     detect_followup_needs_clarification,
+    detect_and_redact_pii_with_ai,
 )
 
 router = APIRouter()
@@ -60,3 +62,19 @@ async def check_followup_vagueness(req: FollowUpCheckRequest):
 async def cleanup(req: CleanupRequest):
     result = await cleanup_transcript(req.raw_text)
     return CleanupResponse(**result)
+
+
+@router.post("/ai/pii-check", response_model=PiiCheckResponse)
+async def check_pii(req: PiiCheckRequest):
+    """Regex + GPT-5-mini PII scan used by the survey Next click.
+
+    Returns metadata only (found / count / categories) — never the redacted
+    text — because this endpoint is an advisory signal for the banner, not a
+    save path. The authoritative scrub happens in ``/submissions/.../answer``
+    via ``detect_and_redact_pii_with_ai`` on save.
+
+    The underlying service memoises by sha256(text) and short-circuits
+    AI calls for very short clean inputs, so repeat Next clicks stay cheap.
+    """
+    _redacted, count, cats = await detect_and_redact_pii_with_ai(req.text or "")
+    return PiiCheckResponse(found=bool(count), count=count, categories=cats)

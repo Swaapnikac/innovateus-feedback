@@ -151,7 +151,12 @@ export function trackVoiceRecordingStarted(questionId: string) {
 export function trackVoiceRecordingStopped(
   questionId: string,
   durationSec: number,
-  reason: "user_stop" | "silence_timeout" | "error" | "unmount" = "user_stop",
+  reason:
+    | "user_stop"
+    | "silence_timeout"
+    | "max_duration"
+    | "error"
+    | "unmount" = "user_stop",
 ) {
   trackEvent("voice_recording_stopped", {
     question_id: questionId,

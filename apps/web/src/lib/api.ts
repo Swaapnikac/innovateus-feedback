@@ -437,6 +437,18 @@ export const api = {
       }),
     }),
 
+  // Regex + GPT-5-mini PII scan. Returns metadata only — no redacted text.
+  // Used by the survey Next click to catch categories (names, soft
+  // addresses) that client-side regex cannot pick up on its own.
+  checkPii: (text: string) =>
+    request<{ found: boolean; count: number; categories: string[] }>(
+      "/v1/ai/pii-check",
+      {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      },
+    ),
+
   // Context-aware check used AFTER follow-up 1 has been answered, to decide
   // whether a follow-up 2 is genuinely needed. The backend uses a stricter,
   // follow-up-level prompt that knows the participant already had one chance.

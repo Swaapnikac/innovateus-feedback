@@ -137,6 +137,16 @@ class CleanupResponse(BaseModel):
     changed: bool
 
 
+class PiiCheckRequest(BaseModel):
+    text: str = Field(..., max_length=5000)
+
+
+class PiiCheckResponse(BaseModel):
+    found: bool
+    count: int
+    categories: list[str]
+
+
 class CompleteSubmissionResponse(BaseModel):
     status: str
     extraction: Optional[dict] = None
