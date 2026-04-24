@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { InnovateLogo } from "@/components/InnovateLogo";
-import { Shield, ArrowRight, CheckCircle2, Clock } from "lucide-react";
+import { Shield, ArrowRight, CheckCircle2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { initSession, trackPageView, trackEvent, setContext } from "@/lib/analytics";
 
@@ -95,13 +95,40 @@ export default function ConsentPage() {
         ) : (
           <>
             <div className="text-center space-y-3">
-              <div className="inline-flex items-center gap-2 bg-brand-yellow/15 text-brand-dark-yellow text-xs font-semibold uppercase tracking-widest px-4 py-1.5 rounded-full">
-                <Clock className="h-3 w-3" />
-                This takes about 2–4 minutes
-              </div>
-              <h1 className="text-3xl font-serif text-brand-blue">Share Your Experience</h1>
-              <p className="text-brand-blue/60">Your input helps us improve for future participants.</p>
+              <h1 className="text-3xl font-serif text-brand-blue">Before You Begin</h1>
             </div>
+
+            <Card className="bg-white border-0 shadow-sm rounded-2xl">
+              <CardContent className="pt-5 space-y-4 text-sm leading-relaxed text-brand-blue/70">
+                <p>
+                  Thank you for taking the time to share feedback on this course. We would like to ask a few quick questions about how you used what you learned and what else would be helpful to learn next.
+                </p>
+                <p>
+                  Your participation is voluntary. All questions are optional and anonymous. This survey should take no more than 3–5 minutes.
+                </p>
+                <p>
+                  This questionnaire is part of a research study conducted by the InnovateUS research team, led by Beth Noveck at Northeastern University.
+                </p>
+                <p>
+                  Questions about the research? Contact the Northeastern University research team at{" "}
+                  <a href="mailto:Innovateus_research@northeastern.edu" className="text-brand-blue underline">
+                    Innovateus_research@northeastern.edu
+                  </a>
+                  .
+                </p>
+                <p>
+                  Questions about your rights as a research participant? Contact the Northeastern University Department of Human Research at Tel:{" "}
+                  <a href="tel:+17733962327" className="text-brand-blue underline">
+                    (773) 396-2327
+                  </a>
+                  , or Email:{" "}
+                  <a href="mailto:IRBReview@northeastern.edu" className="text-brand-blue underline">
+                    IRBReview@northeastern.edu
+                  </a>
+                  . You may call anonymously if you want.
+                </p>
+              </CardContent>
+            </Card>
 
             <Card className="bg-white border-0 shadow-sm rounded-2xl">
               <CardHeader className="pb-2">

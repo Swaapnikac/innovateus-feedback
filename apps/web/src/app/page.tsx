@@ -20,8 +20,11 @@ export default function HomePage() {
       <AnalyticsPageView page="landing" />
       {/* ───── Navbar ───── */}
       <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-[#E4EFFC]">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-6 h-16 grid grid-cols-[auto_1fr_auto] items-center gap-6">
           <InnovateLogo size="md" />
+          <p className="hidden md:block text-center text-sm text-[#124D8F]/70">
+            Help improve future public service learning experiences
+          </p>
           <Link href={`/c/${DEFAULT_COHORT_ID}`}>
             <Button
               size="sm"
@@ -40,7 +43,7 @@ export default function HomePage() {
           <div className="max-w-3xl text-center space-y-8">
             <h1 className="text-4xl md:text-[3.25rem] font-serif text-[#124D8F] leading-[1.15] tracking-tight">
               <span className="relative">
-                Share your voice
+                Share your experience
                 <svg className="absolute -bottom-1 left-0 w-full" viewBox="0 0 200 8" fill="none">
                   <path d="M1 6C50 2 150 2 199 6" stroke="#FDCE3E" strokeWidth="3" strokeLinecap="round"/>
                 </svg>
@@ -49,8 +52,7 @@ export default function HomePage() {
             </h1>
 
             <p className="text-lg text-[#124D8F]/60 leading-relaxed mx-auto" style={{ maxWidth: "46rem" }}>
-              Talk it out or type it down, your feedback wears the crown.<br className="hidden sm:inline" />
-              Quick, anonymous, and effortless. Because better programs start with honest voices.
+              Answer a few quick questions about how you used what you learned and what would be helpful to learn next. Your responses are optional, anonymous, and will help improve future learning experiences.
             </p>
 
             <div className="pt-2">
@@ -64,7 +66,7 @@ export default function HomePage() {
 
             <div className="flex items-center justify-center gap-6 text-sm text-[#124D8F]/40 pt-2">
               <span className="flex items-center gap-1.5">
-                <Clock className="h-3.5 w-3.5" /> 2–4 min
+                <Clock className="h-3.5 w-3.5" /> 3–5 min
               </span>
               <span className="flex items-center gap-1.5">
                 <Shield className="h-3.5 w-3.5" /> Anonymous
