@@ -104,6 +104,9 @@ export default function ConsentPage() {
                   Thank you for taking the time to share feedback on this course. We would like to ask a few quick questions about how you used what you learned and what else would be helpful to learn next.
                 </p>
                 <p>
+                  You may answer open-ended questions by typing or speaking. When a response could use more detail, AI may ask up to two optional follow-up questions and may help summarize responses for analysis.
+                </p>
+                <p>
                   Your participation is voluntary. All questions are optional and anonymous. This survey should take no more than 3–5 minutes.
                 </p>
                 <p>
