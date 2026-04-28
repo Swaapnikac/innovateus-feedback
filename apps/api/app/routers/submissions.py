@@ -2,10 +2,10 @@ import uuid
 import hashlib
 import logging
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Request, Response, Depends
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.db import get_db
+from app.db import get_db, async_session
 from app.models import Cohort, Submission, Answer, Extraction
 from app.schemas import (
     StartSubmissionRequest,
@@ -452,24 +452,19 @@ async def preview_extraction(submission_id: uuid.UUID, db: AsyncSession = Depend
     return CompleteSubmissionResponse(status="preview", extraction=extraction_data)
 
 
-@router.post("/submissions/{submission_id}/complete", response_model=CompleteSubmissionResponse)
-async def complete_submission(submission_id: uuid.UUID, response: Response, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Submission).where(Submission.id == submission_id))
-    sub = result.scalar_one_or_none()
-    if not sub:
-        raise HTTPException(status_code=404, detail="Submission not found")
+async def _run_extraction_in_background(submission_id: uuid.UUID, answers_for_extraction: list[dict]):
+    """Run GPT-5 extraction and persist the Extraction row + Qualtrics sync.
 
-    answers_q = await db.execute(select(Answer).where(Answer.submission_id == submission_id))
-    answers = answers_q.scalars().all()
-    answers_for_extraction = _build_answers_for_extraction(answers)
-
-    extraction_data = None
-    extraction_meta: dict = {}
+    Executed via FastAPI BackgroundTasks AFTER the /complete response has been
+    returned, so the user sees the "Done" screen instantly. Uses its own
+    AsyncSession because the request-scoped session closed when the response
+    flushed.
+    """
     try:
         raw = await extract_structured(answers_for_extraction)
         extraction_data, extraction_meta = _split_extraction(raw)
     except Exception as e:
-        logger.warning(f"Extraction failed for submission {submission_id}: {e}")
+        logger.warning(f"Background extraction failed for {submission_id}: {e}")
         extraction_data = dict(_EMPTY_EXTRACTION)
         extraction_meta = {
             "model_name": None,
@@ -478,6 +473,80 @@ async def complete_submission(submission_id: uuid.UUID, response: Response, db: 
             "success_flag": False,
             "error_message": str(e)[:500],
         }
+
+    async with async_session() as db:
+        try:
+            existing_ext = await db.execute(
+                select(Extraction).where(Extraction.submission_id == submission_id)
+            )
+            ext_row = existing_ext.scalar_one_or_none()
+            if ext_row:
+                ext_row.what_was_tried = extraction_data.get("what_was_tried")
+                ext_row.planned_task_or_workflow = extraction_data.get("planned_task_or_workflow")
+                ext_row.outcome_or_expected_outcome = extraction_data.get("outcome_or_expected_outcome")
+                ext_row.barriers = extraction_data.get("barriers")
+                ext_row.enablers = extraction_data.get("enablers")
+                ext_row.public_benefit = extraction_data.get("public_benefit")
+                ext_row.top_themes = extraction_data.get("top_themes")
+                ext_row.success_story_candidate = extraction_data.get("success_story_candidate")
+                ext_row.model_name = extraction_meta.get("model_name")
+                ext_row.model_version = extraction_meta.get("model_version")
+                ext_row.prompt_version = extraction_meta.get("prompt_version")
+                ext_row.run_at = extraction_meta.get("run_at")
+                ext_row.success_flag = extraction_meta.get("success_flag")
+                ext_row.error_message = extraction_meta.get("error_message")
+            else:
+                ext = Extraction(
+                    submission_id=submission_id,
+                    what_was_tried=extraction_data.get("what_was_tried"),
+                    planned_task_or_workflow=extraction_data.get("planned_task_or_workflow"),
+                    outcome_or_expected_outcome=extraction_data.get("outcome_or_expected_outcome"),
+                    barriers=extraction_data.get("barriers"),
+                    enablers=extraction_data.get("enablers"),
+                    public_benefit=extraction_data.get("public_benefit"),
+                    top_themes=extraction_data.get("top_themes"),
+                    success_story_candidate=extraction_data.get("success_story_candidate"),
+                    model_name=extraction_meta.get("model_name"),
+                    model_version=extraction_meta.get("model_version"),
+                    prompt_version=extraction_meta.get("prompt_version"),
+                    run_at=extraction_meta.get("run_at"),
+                    success_flag=extraction_meta.get("success_flag"),
+                    error_message=extraction_meta.get("error_message"),
+                )
+                db.add(ext)
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            logger.warning(f"Saving background extraction failed for {submission_id}: {e}")
+            return
+
+    # Qualtrics sync depends on the extraction row, so run it after the save.
+    try:
+        from app.services.qualtrics_service import sync_submission as qualtrics_sync
+        qualtrics_result = await qualtrics_sync(submission_id)
+        if not qualtrics_result.get("success") and qualtrics_result.get("error") != "Qualtrics not configured":
+            logger.warning("Qualtrics sync failed for %s: %s", submission_id, qualtrics_result.get("error"))
+    except Exception as e:
+        logger.warning("Qualtrics sync error for %s: %s", submission_id, e)
+
+
+@router.post("/submissions/{submission_id}/complete", response_model=CompleteSubmissionResponse)
+async def complete_submission(
+    submission_id: uuid.UUID,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Submission).where(Submission.id == submission_id))
+    sub = result.scalar_one_or_none()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    answers_q = await db.execute(select(Answer).where(Answer.submission_id == submission_id))
+    answers = answers_q.scalars().all()
+    # Build the plain-dict payload while ORM rows are still attached, so the
+    # background task does not need the request-scoped session.
+    answers_for_extraction = _build_answers_for_extraction(answers)
 
     now = datetime.now(timezone.utc)
     time_to_complete = None
@@ -538,57 +607,8 @@ async def complete_submission(submission_id: uuid.UUID, response: Response, db: 
     if sub.ended_in_voice is None and initial_open_modes:
         sub.ended_in_voice = initial_open_modes[-1] == "voice"
 
-    # Save extraction
-    existing_ext = await db.execute(select(Extraction).where(Extraction.submission_id == submission_id))
-    ext_row = existing_ext.scalar_one_or_none()
-    if ext_row:
-        ext_row.what_was_tried = extraction_data.get("what_was_tried")
-        ext_row.planned_task_or_workflow = extraction_data.get("planned_task_or_workflow")
-        ext_row.outcome_or_expected_outcome = extraction_data.get("outcome_or_expected_outcome")
-        ext_row.barriers = extraction_data.get("barriers")
-        ext_row.enablers = extraction_data.get("enablers")
-        ext_row.public_benefit = extraction_data.get("public_benefit")
-        ext_row.top_themes = extraction_data.get("top_themes")
-        ext_row.success_story_candidate = extraction_data.get("success_story_candidate")
-        ext_row.model_name = extraction_meta.get("model_name")
-        ext_row.model_version = extraction_meta.get("model_version")
-        ext_row.prompt_version = extraction_meta.get("prompt_version")
-        ext_row.run_at = extraction_meta.get("run_at")
-        ext_row.success_flag = extraction_meta.get("success_flag")
-        ext_row.error_message = extraction_meta.get("error_message")
-    else:
-        ext = Extraction(
-            submission_id=submission_id,
-            what_was_tried=extraction_data.get("what_was_tried"),
-            planned_task_or_workflow=extraction_data.get("planned_task_or_workflow"),
-            outcome_or_expected_outcome=extraction_data.get("outcome_or_expected_outcome"),
-            barriers=extraction_data.get("barriers"),
-            enablers=extraction_data.get("enablers"),
-            public_benefit=extraction_data.get("public_benefit"),
-            top_themes=extraction_data.get("top_themes"),
-            success_story_candidate=extraction_data.get("success_story_candidate"),
-            model_name=extraction_meta.get("model_name"),
-            model_version=extraction_meta.get("model_version"),
-            prompt_version=extraction_meta.get("prompt_version"),
-            run_at=extraction_meta.get("run_at"),
-            success_flag=extraction_meta.get("success_flag"),
-            error_message=extraction_meta.get("error_message"),
-        )
-        db.add(ext)
-
-    # Qualtrics sync needs committed data (it opens its own session)
-    await db.commit()
-
-    # Qualtrics sync
-    try:
-        from app.services.qualtrics_service import sync_submission as qualtrics_sync
-        qualtrics_result = await qualtrics_sync(submission_id)
-        if not qualtrics_result.get("success") and qualtrics_result.get("error") != "Qualtrics not configured":
-            logger.warning("Qualtrics sync failed for %s: %s", submission_id, qualtrics_result.get("error"))
-    except Exception as e:
-        logger.warning("Qualtrics sync error for %s: %s", submission_id, e)
-
-    # Set duplicate-prevention cookie
+    # Set duplicate-prevention cookie before we commit, so we can still read the
+    # cohort row from the request-scoped session.
     cohort_q = await db.execute(select(Cohort).where(Cohort.id == sub.cohort_id))
     cohort = cohort_q.scalar_one_or_none()
     # Only set the duplicate-prevention cookie when the cohort actually
@@ -604,7 +624,18 @@ async def complete_submission(submission_id: uuid.UUID, response: Response, db: 
             max_age=30 * 24 * 3600,
         )
 
-    return CompleteSubmissionResponse(status="completed", extraction=extraction_data)
+    # Persist the submission update (status/completed_at/mode flags) right now;
+    # extraction + Qualtrics sync run after the response is sent.
+    await db.commit()
+
+    background_tasks.add_task(
+        _run_extraction_in_background, submission_id, answers_for_extraction
+    )
+
+    # The dashboard will pick up the Extraction row a few seconds later. We
+    # return the empty placeholder so the client knows the request succeeded
+    # and can render the "Done" screen immediately.
+    return CompleteSubmissionResponse(status="completed", extraction=dict(_EMPTY_EXTRACTION))
 
 
 @router.post("/submissions/{submission_id}/experience-rating")

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -55,6 +55,9 @@ export default function ReviewPage() {
   const [extraction, setExtraction] = useState<ExtractionResult | null>(null);
   const [loadingExtraction, setLoadingExtraction] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  // Synchronous guard against double-submit: React state updates are batched,
+  // so a second click can fire before `submitting` flips to true.
+  const submitInFlightRef = useRef(false);
   const [showRating, setShowRating] = useState(false);
   const [ratingSubmitting, setRatingSubmitting] = useState(false);
   const [loading, setLoading] = useState(() => loadStoredQuestions().length === 0);
@@ -150,20 +153,35 @@ export default function ReviewPage() {
 
   const handleSubmit = async () => {
     if (!submissionId) return;
+    // Don't allow submit until the AI summary has finished loading. The
+    // backend can technically accept the submission, but submitting before the
+    // user has seen / had a chance to edit their summary leads to a confusing
+    // experience.
+    if (loadingExtraction) return;
+    // Hard guard: if a previous click is still in flight, ignore subsequent ones.
+    if (submitInFlightRef.current) return;
+    submitInFlightRef.current = true;
     setSubmitting(true);
     try {
       const result = await api.completeSubmission(submissionId);
-      sessionStorage.setItem("extraction", JSON.stringify(result.extraction));
+      // /complete now runs the GPT-5 extraction in the background and returns
+      // an empty placeholder, so prefer the preview extraction we already have
+      // on this page (the one shown in the summary card). Only fall back to
+      // the API result if for some reason we never got a preview.
+      const extractionForDone = extraction ?? result.extraction;
+      sessionStorage.setItem("extraction", JSON.stringify(extractionForDone));
       sessionStorage.removeItem("review_answers");
       trackEvent("survey_complete", {
         questions_answered: answeredQuestions.length,
         total_questions: visibleQuestions.length,
       }, cohortId);
-      setSubmitting(false);
+      // Keep `submitting` true until the rating overlay swaps the bar out, so
+      // the button never re-enables for even a single render frame.
       setShowRating(true);
     } catch {
       alert("Failed to submit. Please try again.");
       setSubmitting(false);
+      submitInFlightRef.current = false;
     }
   };
 
@@ -299,17 +317,31 @@ export default function ReviewPage() {
         <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-brand-blue/10 py-4 px-6 z-50">
           <div className="max-w-3xl mx-auto flex justify-center">
             <Button
-              onClick={handleSubmit}
-              disabled={submitting}
+              type="button"
+              onClick={(e) => {
+                if (submitting || submitInFlightRef.current || loadingExtraction) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  return;
+                }
+                handleSubmit();
+              }}
+              disabled={submitting || loadingExtraction}
+              aria-busy={submitting || loadingExtraction}
+              aria-disabled={submitting || loadingExtraction}
               size="lg"
-              className="text-base bg-brand-blue hover:bg-brand-blue/90 shadow-lg gap-2 px-10"
+              className={`text-base bg-brand-blue hover:bg-brand-blue/90 shadow-lg gap-2 px-10 disabled:opacity-60 disabled:cursor-not-allowed ${submitting || loadingExtraction ? "pointer-events-none" : ""}`}
             >
-              {submitting ? (
+              {submitting || loadingExtraction ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Send className="h-4 w-4" />
               )}
-              {submitting ? "Submitting..." : "Submit Feedback"}
+              {submitting
+                ? "Submitting..."
+                : loadingExtraction
+                  ? "Preparing summary..."
+                  : "Submit Feedback"}
             </Button>
           </div>
         </div>
