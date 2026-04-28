@@ -27,7 +27,7 @@ export function MatrixQuestion({ rows, columns, value, onChange }: MatrixQuestio
 
   if (rows.length === 0 || columns.length === 0) {
     return (
-      <p className="text-xs text-brand-blue/40 italic">
+      <p className="text-xs text-brand-blue/60 italic">
         Matrix question missing rows or columns.
       </p>
     );
@@ -38,7 +38,7 @@ export function MatrixQuestion({ rows, columns, value, onChange }: MatrixQuestio
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-brand-blue/10">
-            <th className="text-left py-2 px-2 font-normal text-xs text-brand-blue/40 uppercase tracking-wider"></th>
+            <th className="text-left py-2 px-2 font-normal text-xs text-brand-blue/60 uppercase tracking-wider"></th>
             {columns.map((col) => (
               <th
                 key={String(col)}

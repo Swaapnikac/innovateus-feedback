@@ -23,7 +23,7 @@ export function ExtractionCard({
           <Sparkles className="h-4 w-4 text-brand-dark-yellow" />
           {title}
         </CardTitle>
-        <p className="text-xs text-brand-blue/40">{subtitle}</p>
+        <p className="text-xs text-brand-blue/60">{subtitle}</p>
       </CardHeader>
       <CardContent className="space-y-4">
         {extraction.planned_task_or_workflow && (
@@ -32,7 +32,7 @@ export function ExtractionCard({
               <Target className="h-4 w-4 text-brand-blue" />
             </div>
             <div>
-              <p className="text-xs font-semibold text-brand-blue/40 uppercase tracking-wider">Planned Task</p>
+              <p className="text-xs font-semibold text-brand-blue/60 uppercase tracking-wider">Planned Task</p>
               <p className="text-sm text-brand-blue/80 mt-0.5">{extraction.planned_task_or_workflow}</p>
             </div>
           </div>
@@ -44,7 +44,7 @@ export function ExtractionCard({
               <Lightbulb className="h-4 w-4 text-brand-dark-yellow" />
             </div>
             <div>
-              <p className="text-xs font-semibold text-brand-blue/40 uppercase tracking-wider">What Was Tried</p>
+              <p className="text-xs font-semibold text-brand-blue/60 uppercase tracking-wider">What Was Tried</p>
               <p className="text-sm text-brand-blue/80 mt-0.5">{extraction.what_was_tried}</p>
             </div>
           </div>
@@ -56,7 +56,7 @@ export function ExtractionCard({
               <AlertTriangle className="h-4 w-4 text-brand-red" />
             </div>
             <div>
-              <p className="text-xs font-semibold text-brand-blue/40 uppercase tracking-wider">Barriers</p>
+              <p className="text-xs font-semibold text-brand-blue/60 uppercase tracking-wider">Barriers</p>
               <div className="flex flex-wrap gap-1.5 mt-1">
                 {extraction.barriers.map((b) => (
                   <Badge key={b} variant="outline" className="text-xs rounded-full border-brand-blue/10 text-brand-blue/60">{b}</Badge>
@@ -72,7 +72,7 @@ export function ExtractionCard({
               <Users className="h-4 w-4 text-brand-teal" />
             </div>
             <div>
-              <p className="text-xs font-semibold text-brand-blue/40 uppercase tracking-wider">Public Benefit</p>
+              <p className="text-xs font-semibold text-brand-blue/60 uppercase tracking-wider">Public Benefit</p>
               <p className="text-sm text-brand-blue/80 mt-0.5">{extraction.public_benefit}</p>
             </div>
           </div>
@@ -80,7 +80,7 @@ export function ExtractionCard({
 
         {extraction.top_themes && extraction.top_themes.length > 0 && (
           <div className="pt-2 border-t border-brand-blue/5">
-            <p className="text-xs font-semibold text-brand-blue/40 uppercase tracking-wider mb-2">Themes</p>
+            <p className="text-xs font-semibold text-brand-blue/60 uppercase tracking-wider mb-2">Themes</p>
             <div className="flex flex-wrap gap-1.5">
               {extraction.top_themes.map((t) => (
                 <span key={t} className="bg-brand-light-blue text-brand-blue text-xs px-3 py-1 rounded-full">{t}</span>
@@ -91,7 +91,7 @@ export function ExtractionCard({
 
         {extraction.success_story_candidate && (
           <div className="bg-brand-light-blue/50 rounded-xl p-4 mt-2">
-            <p className="text-xs font-semibold text-brand-blue/40 uppercase tracking-wider mb-1">Your Success Story</p>
+            <p className="text-xs font-semibold text-brand-blue/60 uppercase tracking-wider mb-1">Your Success Story</p>
             <p className="text-sm italic text-brand-blue/70">&ldquo;{extraction.success_story_candidate}&rdquo;</p>
           </div>
         )}

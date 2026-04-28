@@ -86,7 +86,7 @@ export default function ConsentPage() {
                 <p className="text-sm text-brand-blue/70 leading-relaxed max-w-sm mx-auto">
                   It looks like you&apos;ve already submitted feedback for this course. We appreciate your participation!
                 </p>
-                <p className="text-xs text-brand-blue/40">
+                <p className="text-xs text-brand-blue/60">
                   If you believe this is an error, please contact your program administrator.
                 </p>
               </CardContent>

@@ -701,7 +701,7 @@ export default function SurveyPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-brand-light-blue/40 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-brand-blue" />
+        <Loader2 className="h-8 w-8 motion-safe:animate-spin text-brand-blue" />
       </div>
     );
   }
@@ -713,7 +713,8 @@ export default function SurveyPage() {
           <InnovateLogo size="sm" />
         </div>
       </header>
-      <div className="max-w-3xl mx-auto px-4 space-y-6">
+      <main id="main" tabIndex={-1} className="max-w-3xl mx-auto px-4 space-y-6 focus:outline-none">
+        <h1 className="sr-only">Course feedback survey</h1>
         <ProgressBar current={currentStep + 1} total={visibleQuestions.length} />
 
         {currentQuestion && (
@@ -721,6 +722,8 @@ export default function SurveyPage() {
             text={currentQuestion.text}
             description={currentQuestion.description}
             required={currentQuestion.required}
+            headingId={`question-heading-${currentQuestion.id}`}
+            descriptionId={currentQuestion.description ? `question-desc-${currentQuestion.id}` : undefined}
           >
             {(currentQuestion.type === "rating" || currentQuestion.type === "mcq") && (
               <ChoiceQuestion
@@ -787,6 +790,7 @@ export default function SurveyPage() {
                 options={currentQuestion.options || []}
                 value={getAnswer(currentQuestion.id).value}
                 onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
+                labelledById={`question-heading-${currentQuestion.id}`}
               />
             )}
 
@@ -794,6 +798,7 @@ export default function SurveyPage() {
               <ShortTextQuestion
                 value={getAnswer(currentQuestion.id).value}
                 onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
+                labelledById={`question-heading-${currentQuestion.id}`}
               />
             )}
 
@@ -801,6 +806,7 @@ export default function SurveyPage() {
               <DateQuestion
                 value={getAnswer(currentQuestion.id).value}
                 onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
+                labelledById={`question-heading-${currentQuestion.id}`}
               />
             )}
 
@@ -808,6 +814,15 @@ export default function SurveyPage() {
               <OpenEndedQuestion
                 key={currentQuestion.id}
                 questionId={currentQuestion.id}
+                labelledById={`question-heading-${currentQuestion.id}`}
+                describedById={
+                  irrelevantError
+                    ? "survey-irrelevant-error"
+                    : currentQuestion.description
+                      ? `question-desc-${currentQuestion.id}`
+                      : undefined
+                }
+                invalid={Boolean(irrelevantError)}
                 value={getAnswer(currentQuestion.id).value}
                 onChange={(v) => updateAnswer(currentQuestion.id, { value: v })}
                 voiceEligible={currentQuestion.voice_eligible}
@@ -850,8 +865,13 @@ export default function SurveyPage() {
         )}
 
         {irrelevantError && (
-          <div className="max-w-3xl mx-auto bg-brand-red/5 border border-brand-red/20 rounded-xl px-4 py-3 flex items-start gap-3">
-            <span className="text-brand-red text-lg shrink-0">!</span>
+          <div
+            id="survey-irrelevant-error"
+            role="alert"
+            aria-live="assertive"
+            className="max-w-3xl mx-auto bg-brand-red/5 border border-brand-red/20 rounded-xl px-4 py-3 flex items-start gap-3"
+          >
+            <span className="text-brand-red text-lg shrink-0" aria-hidden="true">!</span>
             <div>
               <p className="text-sm text-brand-red/80">{irrelevantError}</p>
               <button
@@ -866,8 +886,12 @@ export default function SurveyPage() {
         )}
 
         {aiCheckError && (
-          <div className="max-w-3xl mx-auto bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-3">
-            <span className="text-amber-600 text-lg shrink-0">!</span>
+          <div
+            role="alert"
+            aria-live="assertive"
+            className="max-w-3xl mx-auto bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-3"
+          >
+            <span className="text-amber-600 text-lg shrink-0" aria-hidden="true">!</span>
             <div>
               <p className="text-sm text-amber-700">{aiCheckError}</p>
               <button
@@ -882,8 +906,12 @@ export default function SurveyPage() {
         )}
 
         {piiNotice && (
-          <div className="max-w-3xl mx-auto bg-brand-red/5 border border-brand-red/20 rounded-xl px-4 py-3 flex items-start gap-3">
-            <span className="text-brand-red text-lg shrink-0">!</span>
+          <div
+            role="status"
+            aria-live="polite"
+            className="max-w-3xl mx-auto bg-brand-red/5 border border-brand-red/20 rounded-xl px-4 py-3 flex items-start gap-3"
+          >
+            <span className="text-brand-red text-lg shrink-0" aria-hidden="true">!</span>
             <div>
               <p className="text-sm text-brand-red/80">{piiNotice}</p>
               <button
@@ -915,7 +943,7 @@ export default function SurveyPage() {
             disabled={!isCurrentValid() || saving || checkingVagueness || checkingFollowupVagueness}
             className="gap-2 bg-brand-blue hover:bg-brand-blue/90 shadow-sm"
           >
-            {(checkingVagueness || checkingFollowupVagueness) && <Loader2 className="h-4 w-4 animate-spin" />}
+            {(checkingVagueness || checkingFollowupVagueness) && <Loader2 className="h-4 w-4 motion-safe:animate-spin" />}
             {checkingVagueness || checkingFollowupVagueness
               ? "Analyzing..."
               : editReturnMode
@@ -926,7 +954,7 @@ export default function SurveyPage() {
             {!(checkingVagueness || checkingFollowupVagueness) && <ChevronRight className="h-4 w-4" />}
           </Button>
         </div>
-      </div>
+      </main>
       <PrivacyFooter />
     </div>
   );

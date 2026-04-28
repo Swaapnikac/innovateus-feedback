@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Serif_Display, DM_Serif_Text, Libre_Franklin, Geist_Mono } from "next/font/google";
+import { SkipLink } from "@/components/SkipLink";
 import "./globals.css";
 
 const dmSerifDisplay = DM_Serif_Display({
@@ -41,6 +42,7 @@ export default function RootLayout({
       <body
         className={`${dmSerifDisplay.variable} ${dmSerifText.variable} ${libreFranklin.variable} ${geistMono.variable} antialiased`}
       >
+        <SkipLink />
         {children}
       </body>
     </html>

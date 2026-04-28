@@ -32,7 +32,7 @@ export function NpsQuestion({ value, onChange, labels }: NpsQuestionProps) {
           </button>
         ))}
       </div>
-      <div className="flex justify-between text-xs text-brand-blue/40">
+      <div className="flex justify-between text-xs text-brand-blue/60">
         <span>0 — {lowLabel}</span>
         <span>10 — {highLabel}</span>
       </div>

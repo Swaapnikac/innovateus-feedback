@@ -26,7 +26,7 @@ export function SliderQuestion({
         <span className="text-xs text-brand-blue/50">{labels?.low ?? min}</span>
         <div
           className={`px-4 py-1.5 rounded-full text-sm font-semibold ${
-            isSet ? "bg-brand-blue text-white" : "bg-brand-light-blue text-brand-blue/40"
+            isSet ? "bg-brand-blue text-white" : "bg-brand-light-blue text-brand-blue/60"
           }`}
         >
           {isSet ? current : "—"}

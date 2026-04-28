@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useImperativeHandle, forwardRef } from "react";
+import { useState, useImperativeHandle, forwardRef, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { MessageCircle, SkipForward, Mic, Type, Pencil, Loader2 } from "lucide-react";
@@ -85,6 +85,26 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
     editMode ? null : (firstUnanswered >= 0 ? firstUnanswered : null)
   );
   const [inputMode, setInputMode] = useState<"text" | "voice">("voice");
+
+  // Focus management: when a new follow-up becomes active, move focus to its
+  // input area so screen-reader and keyboard users land on it without having
+  // to tab through the whole page.
+  const activeQuestionRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (activeIndex === null || editMode) return;
+    // Defer until after render so the element exists in the DOM.
+    const id = window.setTimeout(() => {
+      const root = activeQuestionRef.current;
+      if (!root) return;
+      const focusable = root.querySelector<HTMLElement>(
+        'textarea, button[type="button"]:not([aria-pressed="false"])'
+      );
+      // Prefer the textarea when present; otherwise the first action button
+      // inside the voice recorder (Start/Stop/Use this response).
+      (focusable ?? root.querySelector<HTMLElement>("textarea, button"))?.focus();
+    }, 50);
+    return () => window.clearTimeout(id);
+  }, [activeIndex, editMode]);
 
   // Expose current answers to parent so it can flush unsaved typed text on Next click.
   // B8: preserve empty strings so that a cleared follow-up answer propagates
@@ -214,17 +234,28 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
           const mode = getEditInputMode(i);
           return (
             <div key={i} className="space-y-3">
-              <p className="text-sm font-medium text-brand-blue/70">{fq}</p>
+              <p
+                id={`followup-question-${followupQid(i)}`}
+                className="text-sm font-medium text-brand-blue/70"
+              >
+                {fq}
+              </p>
 
-              <div className="inline-flex rounded-lg border bg-muted p-1 gap-1">
+              <div
+                role="group"
+                aria-label="Follow-up response input mode"
+                className="inline-flex rounded-lg border bg-muted p-1 gap-1"
+              >
                 <Button
                   type="button"
                   variant={mode === "text" ? "default" : "ghost"}
                   size="sm"
                   onClick={() => setEditModes((prev) => ({ ...prev, [i]: "text" }))}
+                  aria-pressed={mode === "text"}
+                  aria-label="Type your follow-up response"
                   className="gap-1.5 !rounded-md text-xs"
                 >
-                  <Type className="h-3.5 w-3.5" />
+                  <Type className="h-3.5 w-3.5" aria-hidden="true" />
                   Type
                 </Button>
                 <Button
@@ -232,9 +263,11 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
                   variant={mode === "voice" ? "default" : "ghost"}
                   size="sm"
                   onClick={() => setEditModes((prev) => ({ ...prev, [i]: "voice" }))}
+                  aria-pressed={mode === "voice"}
+                  aria-label="Speak your follow-up response"
                   className="gap-1.5 !rounded-md text-xs"
                 >
-                  <Mic className="h-3.5 w-3.5" />
+                  <Mic className="h-3.5 w-3.5" aria-hidden="true" />
                   Voice
                 </Button>
               </div>
@@ -247,9 +280,10 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
                     placeholder="Type your response (optional)..."
                     className="min-h-[80px] resize-y text-sm"
                     maxLength={MAX_ANSWER_CHARS}
+                    aria-labelledby={`followup-question-${followupQid(i)}`}
                   />
                   <PiiWarning text={answers[i] || ""} />
-                  <p className={`text-xs text-right ${(answers[i]?.length || 0) >= MAX_ANSWER_CHARS - 20 ? "text-brand-red" : "text-brand-blue/40"}`}>
+                  <p className={`text-xs text-right ${(answers[i]?.length || 0) >= MAX_ANSWER_CHARS - 20 ? "text-brand-red" : "text-brand-blue/60"}`}>
                     {answers[i]?.length || 0}/{MAX_ANSWER_CHARS}
                   </p>
                 </div>
@@ -298,14 +332,14 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
                     {answered}
                   </p>
                 ) : (
-                  <p className="text-xs italic text-brand-blue/30 pl-1 flex-1 self-center">Skipped</p>
+                  <p className="text-xs italic text-brand-blue/60 pl-1 flex-1 self-center">Skipped</p>
                 )}
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   onClick={() => handleEdit(i)}
-                  className="shrink-0 gap-1 text-brand-blue/40 hover:text-brand-blue/70 text-xs"
+                  className="shrink-0 gap-1 text-brand-blue/60 hover:text-brand-blue/80 text-xs"
                 >
                   <Pencil className="h-3 w-3" />
                   Edit
@@ -324,18 +358,36 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
         const isEditingExisting = committedIndices.has(i);
 
         return (
-          <div key={i} className="space-y-3">
-            <p className="text-sm font-medium text-foreground">{fq}</p>
+          <div
+            key={i}
+            ref={isActive ? activeQuestionRef : undefined}
+            className="space-y-3"
+            role="region"
+            aria-live="polite"
+            aria-labelledby={`followup-question-${followupQid(i)}`}
+          >
+            <p
+              id={`followup-question-${followupQid(i)}`}
+              className="text-sm font-medium text-foreground"
+            >
+              {fq}
+            </p>
 
-            <div className="inline-flex rounded-lg border bg-muted p-1 gap-1">
+            <div
+              role="group"
+              aria-label="Follow-up response input mode"
+              className="inline-flex rounded-lg border bg-muted p-1 gap-1"
+            >
               <Button
                 type="button"
                 variant={inputMode === "text" ? "default" : "ghost"}
                 size="sm"
                 onClick={() => switchMode(i, "text")}
+                aria-pressed={inputMode === "text"}
+                aria-label="Type your follow-up response"
                 className="gap-1.5 !rounded-md text-xs"
               >
-                <Type className="h-3.5 w-3.5" />
+                <Type className="h-3.5 w-3.5" aria-hidden="true" />
                 Type
               </Button>
               <Button
@@ -343,9 +395,11 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
                 variant={inputMode === "voice" ? "default" : "ghost"}
                 size="sm"
                 onClick={() => switchMode(i, "voice")}
+                aria-pressed={inputMode === "voice"}
+                aria-label="Speak your follow-up response"
                 className="gap-1.5 !rounded-md text-xs"
               >
-                <Mic className="h-3.5 w-3.5" />
+                <Mic className="h-3.5 w-3.5" aria-hidden="true" />
                 Voice
               </Button>
             </div>
@@ -360,9 +414,10 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
                   placeholder="Type your response (optional)..."
                   className="min-h-[80px] resize-y"
                   maxLength={MAX_ANSWER_CHARS}
+                  aria-labelledby={`followup-question-${followupQid(i)}`}
                 />
                 <PiiWarning text={answers[i] || ""} />
-                <p className={`text-xs text-right ${(answers[i]?.length || 0) >= MAX_ANSWER_CHARS - 20 ? "text-brand-red" : "text-brand-blue/40"}`}>
+                <p className={`text-xs text-right ${(answers[i]?.length || 0) >= MAX_ANSWER_CHARS - 20 ? "text-brand-red" : "text-brand-blue/60"}`}>
                   {answers[i]?.length || 0}/{MAX_ANSWER_CHARS}
                 </p>
               </div>
@@ -398,7 +453,7 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
                 disabled={!answers[i]?.trim() || checkingVagueness}
                 className="bg-brand-blue hover:bg-brand-blue/90 gap-1.5"
               >
-                {checkingVagueness && i === 0 && <Loader2 className="h-3 w-3 animate-spin" />}
+                {checkingVagueness && i === 0 && <Loader2 className="h-3 w-3 motion-safe:animate-spin" />}
                 {isEditingExisting ? "Save" : "Next"}
               </Button>
             </div>

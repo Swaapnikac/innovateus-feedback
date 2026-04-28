@@ -15,15 +15,17 @@ export function DropdownQuestion({
   value,
   onChange,
   placeholder = "Select an option...",
+  labelledById,
 }: {
   options: (string | number)[];
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  labelledById?: string;
 }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="w-full max-w-md">
+      <SelectTrigger className="w-full max-w-md" aria-labelledby={labelledById}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
@@ -42,10 +44,12 @@ export function ShortTextQuestion({
   value,
   onChange,
   placeholder = "Your answer...",
+  labelledById,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  labelledById?: string;
 }) {
   return (
     <Input
@@ -54,6 +58,7 @@ export function ShortTextQuestion({
       placeholder={placeholder}
       className="max-w-md text-base"
       maxLength={200}
+      aria-labelledby={labelledById}
     />
   );
 }
@@ -62,9 +67,11 @@ export function ShortTextQuestion({
 export function DateQuestion({
   value,
   onChange,
+  labelledById,
 }: {
   value: string;
   onChange: (value: string) => void;
+  labelledById?: string;
 }) {
   return (
     <Input
@@ -72,6 +79,7 @@ export function DateQuestion({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       className="max-w-xs text-base"
+      aria-labelledby={labelledById}
     />
   );
 }

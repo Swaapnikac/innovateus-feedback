@@ -45,7 +45,7 @@ export function RankingQuestion({ options, value, onChange }: RankingQuestionPro
             key={opt}
             className="flex items-center gap-2 bg-white border border-brand-blue/10 rounded-lg px-3 py-2"
           >
-            <span className="text-xs font-mono text-brand-blue/30 w-6">{i + 1}.</span>
+            <span className="text-xs font-mono text-brand-blue/60 w-6">{i + 1}.</span>
             <GripVertical className="h-4 w-4 text-brand-blue/20" />
             <span className="flex-1 text-sm text-brand-blue">{opt}</span>
             <Button

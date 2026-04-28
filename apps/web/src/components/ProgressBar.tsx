@@ -13,7 +13,7 @@ export function ProgressBar({ current, total }: ProgressBarProps) {
   return (
     <div className="w-full space-y-2">
       <div className="flex justify-between items-center">
-        <span className="text-xs font-semibold text-brand-blue/40 uppercase tracking-widest">
+        <span className="text-xs font-semibold text-brand-blue/60 uppercase tracking-widest">
           Question {current} of {total}
         </span>
         <span className="text-xs font-semibold text-brand-blue bg-brand-light-blue px-2.5 py-0.5 rounded-full">

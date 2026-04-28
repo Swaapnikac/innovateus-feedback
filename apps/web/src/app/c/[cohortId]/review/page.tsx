@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { InnovateLogo } from "@/components/InnovateLogo";
 import { ExtractionCard } from "@/components/ExtractionCard";
+import { SummarySkeleton } from "@/components/SummarySkeleton";
 import { ExperienceRating } from "@/components/ExperienceRating";
 import { Loader2, Pencil, Send, CheckCircle2 } from "lucide-react";
 import { api, type SurveyQuestion, type ExtractionResult } from "@/lib/api";
@@ -205,7 +206,7 @@ export default function ReviewPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-brand-light-blue/40 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-brand-blue" />
+        <Loader2 className="h-8 w-8 motion-safe:animate-spin text-brand-blue" />
       </div>
     );
   }
@@ -218,7 +219,7 @@ export default function ReviewPage() {
         </div>
       </header>
 
-      <div className="max-w-3xl mx-auto px-4 space-y-6">
+      <main id="main" tabIndex={-1} className="max-w-3xl mx-auto px-4 space-y-6 focus:outline-none">
         {/* Header */}
         <div className="text-center space-y-2">
           <div className="mx-auto w-12 h-12 rounded-full bg-brand-blue/10 flex items-center justify-center">
@@ -248,7 +249,7 @@ export default function ReviewPage() {
                 <CardContent className="pt-5 pb-4">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-brand-blue/40 uppercase tracking-wider mb-1">
+                      <p className="text-xs font-semibold text-brand-blue/60 uppercase tracking-wider mb-1">
                         Question {i + 1}
                       </p>
                       <p className="text-sm font-medium text-brand-blue mb-3">{q.text}</p>
@@ -258,7 +259,7 @@ export default function ReviewPage() {
                           <p className="text-sm text-brand-blue/70 whitespace-pre-wrap bg-brand-light-blue/40 rounded-lg px-3 py-2">{displayAnswer}</p>
                           {ans?.followupAnswers?.followup_1_answer && (
                             <div className="mt-2 pl-3 border-l-2 border-brand-yellow/40">
-                              <p className="text-xs text-brand-blue/40 mb-0.5">Follow-up</p>
+                              <p className="text-xs text-brand-blue/60 mb-0.5">Follow-up</p>
                               <p className="text-sm text-brand-blue/60">{ans.followupAnswers.followup_1_answer}</p>
                             </div>
                           )}
@@ -269,7 +270,7 @@ export default function ReviewPage() {
                           )}
                         </>
                       ) : (
-                        <p className="text-sm italic text-brand-blue/30">Skipped</p>
+                        <p className="text-sm italic text-brand-blue/60">Skipped</p>
                       )}
                     </div>
                     <Button
@@ -290,12 +291,7 @@ export default function ReviewPage() {
 
         {/* Extraction Preview */}
         {loadingExtraction ? (
-          <Card className="bg-white border-0 shadow-sm rounded-2xl">
-            <CardContent className="py-10 flex flex-col items-center gap-3">
-              <Loader2 className="h-6 w-6 animate-spin text-brand-blue/40" />
-              <p className="text-sm text-brand-blue/40">Generating summary...</p>
-            </CardContent>
-          </Card>
+          <SummarySkeleton title="What We Heard" />
         ) : extraction ? (
           <ExtractionCard
             extraction={extraction}
@@ -305,12 +301,12 @@ export default function ReviewPage() {
         ) : (
           <Card className="bg-white border-0 shadow-sm rounded-2xl">
             <CardContent className="py-8 text-center">
-              <p className="text-sm text-brand-blue/40">Summary unavailable</p>
+              <p className="text-sm text-brand-blue/60">Summary unavailable</p>
             </CardContent>
           </Card>
         )}
 
-      </div>
+      </main>
 
       {/* Fixed bottom submit bar */}
       {!showRating && (
@@ -333,7 +329,7 @@ export default function ReviewPage() {
               className={`text-base bg-brand-blue hover:bg-brand-blue/90 shadow-lg gap-2 px-10 disabled:opacity-60 disabled:cursor-not-allowed ${submitting || loadingExtraction ? "pointer-events-none" : ""}`}
             >
               {submitting || loadingExtraction ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 motion-safe:animate-spin" />
               ) : (
                 <Send className="h-4 w-4" />
               )}

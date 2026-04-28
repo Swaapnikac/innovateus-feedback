@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
 import { InnovateLogo } from "@/components/InnovateLogo";
 import { ExtractionCard } from "@/components/ExtractionCard";
@@ -22,9 +22,13 @@ export default function DonePage() {
     }
   });
 
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+
   useEffect(() => {
     initSession();
     trackPageView("done", cohortId);
+    // Focus the Thank You heading so screen-reader users hear the page change.
+    headingRef.current?.focus();
   }, [cohortId]);
 
   return (
@@ -35,13 +39,19 @@ export default function DonePage() {
         </div>
       </header>
 
-      <div className="max-w-2xl mx-auto px-4 py-12 space-y-6">
+      <main id="main" tabIndex={-1} className="max-w-2xl mx-auto px-4 py-12 space-y-6 focus:outline-none">
         {/* Thank You */}
         <div className="text-center space-y-4">
           <div className="mx-auto w-16 h-16 rounded-full bg-brand-teal/10 flex items-center justify-center">
             <CheckCircle2 className="h-8 w-8 text-brand-teal" />
           </div>
-          <h1 className="text-3xl font-serif text-brand-blue">Thank You!</h1>
+          <h1
+            ref={headingRef}
+            tabIndex={-1}
+            className="text-3xl font-serif text-brand-blue focus:outline-none"
+          >
+            Thank You!
+          </h1>
           <p className="text-brand-blue/60">
             Your feedback has been submitted successfully. It will help us improve future courses for public service professionals.
           </p>
@@ -49,7 +59,7 @@ export default function DonePage() {
 
         {/* Extraction Summary */}
         {extraction && <ExtractionCard extraction={extraction} />}
-      </div>
+      </main>
     </div>
   );
 }

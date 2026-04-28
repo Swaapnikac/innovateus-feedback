@@ -17,6 +17,12 @@ interface OpenEndedQuestionProps {
   onTranscriptReady?: (transcript: string) => void;
   onRecordingStarted?: () => void;
   questionId?: string;
+  /** id of the visible question heading, wired up via aria-labelledby */
+  labelledById?: string;
+  /** id of an external error / hint element to wire via aria-describedby */
+  describedById?: string;
+  /** when true, marks the textarea as having an associated error */
+  invalid?: boolean;
 }
 
 export function OpenEndedQuestion({
@@ -28,6 +34,9 @@ export function OpenEndedQuestion({
   onTranscriptReady,
   onRecordingStarted,
   questionId,
+  labelledById,
+  describedById,
+  invalid,
 }: OpenEndedQuestionProps) {
   const [inputMode, setInputMode] = useState<"text" | "voice">(
     initialInputMode ?? (voiceEligible ? "voice" : "text")
@@ -57,15 +66,21 @@ export function OpenEndedQuestion({
   return (
     <div className="space-y-4">
       {voiceEligible && (
-        <div className="inline-flex rounded-lg border bg-muted p-1 gap-1">
+        <div
+          role="group"
+          aria-label="Response input mode"
+          className="inline-flex rounded-lg border bg-muted p-1 gap-1"
+        >
           <Button
             type="button"
             variant={inputMode === "text" ? "default" : "ghost"}
             size="sm"
             onClick={() => handleModeSwitch("text")}
+            aria-pressed={inputMode === "text"}
+            aria-label="Type your response"
             className="gap-2 !rounded-md"
           >
-            <Type className="h-4 w-4" />
+            <Type className="h-4 w-4" aria-hidden="true" />
             Type
           </Button>
           <Button
@@ -73,9 +88,11 @@ export function OpenEndedQuestion({
             variant={inputMode === "voice" ? "default" : "ghost"}
             size="sm"
             onClick={() => handleModeSwitch("voice")}
+            aria-pressed={inputMode === "voice"}
+            aria-label="Speak your response"
             className="gap-2 !rounded-md"
           >
-            <Mic className="h-4 w-4" />
+            <Mic className="h-4 w-4" aria-hidden="true" />
             Voice
           </Button>
         </div>
@@ -89,9 +106,12 @@ export function OpenEndedQuestion({
             placeholder="Type your response here..."
             className="min-h-[120px] resize-y text-base"
             maxLength={MAX_ANSWER_CHARS}
+            aria-labelledby={labelledById}
+            aria-describedby={describedById}
+            aria-invalid={invalid || undefined}
           />
           <PiiWarning text={value} />
-          <p className={`text-xs text-right ${value.length >= MAX_ANSWER_CHARS - 20 ? "text-brand-red" : "text-brand-blue/40"}`}>
+          <p className={`text-xs text-right ${value.length >= MAX_ANSWER_CHARS - 20 ? "text-brand-red" : "text-brand-blue/60"}`}>
             {value.length}/{MAX_ANSWER_CHARS}
           </p>
         </div>

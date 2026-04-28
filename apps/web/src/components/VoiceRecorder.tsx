@@ -523,7 +523,7 @@ export const VoiceRecorder = forwardRef<VoiceRecorderHandle, VoiceRecorderProps>
 
         {isBusy && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Loader2 className="h-4 w-4 motion-safe:animate-spin" />
             {/* Two-phase indicator so the ~2s total wait feels like two quick
                 steps instead of one opaque spinner. */}
             {isTranscribing ? "Transcribing audio…" : "Polishing transcript…"}
@@ -587,7 +587,7 @@ export const VoiceRecorder = forwardRef<VoiceRecorderHandle, VoiceRecorderProps>
               <span className="relative inline-flex rounded-full h-3 w-3 bg-brand-red" />
             </div>
             Still listening...
-            <Volume2 className="h-4 w-4 ml-auto animate-pulse" />
+            <Volume2 className="h-4 w-4 ml-auto motion-safe:animate-pulse" />
           </div>
           <div className="min-h-[60px] text-sm text-foreground/80 italic">
             {liveTranscript || "Speak now, your words will appear here in real time..."}
@@ -633,7 +633,7 @@ export const VoiceRecorder = forwardRef<VoiceRecorderHandle, VoiceRecorderProps>
                 </span>
               )}
             </div>
-            <p className={`text-xs ${transcript.length >= MAX_ANSWER_CHARS - 20 ? "text-brand-red" : "text-brand-blue/40"}`}>
+            <p className={`text-xs ${transcript.length >= MAX_ANSWER_CHARS - 20 ? "text-brand-red" : "text-brand-blue/60"}`}>
               {transcript.length}/{MAX_ANSWER_CHARS}
             </p>
           </div>
