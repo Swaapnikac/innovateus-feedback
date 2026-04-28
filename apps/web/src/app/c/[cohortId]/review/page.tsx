@@ -59,11 +59,21 @@ export default function ReviewPage() {
   // Synchronous guard against double-submit: React state updates are batched,
   // so a second click can fire before `submitting` flips to true.
   const submitInFlightRef = useRef(false);
+  // Captured at submit time so handleRatingSubmit can still hit the rating
+  // endpoint after we wipe submission_id from sessionStorage post-complete.
+  const submittedIdRef = useRef<string | null>(null);
   const [showRating, setShowRating] = useState(false);
   const [ratingSubmitting, setRatingSubmitting] = useState(false);
   const [loading, setLoading] = useState(() => loadStoredQuestions().length === 0);
 
-  const submissionId = typeof window !== "undefined" ? sessionStorage.getItem("submission_id") : null;
+  // Read once on mount and freeze. Reading from sessionStorage on every
+  // render causes the redirect-to-consent guard in the mount useEffect to
+  // fire when we wipe sessionStorage just before navigating to /done, which
+  // races the actual navigation. The submitted-id ref is the source of
+  // truth from submit time onward.
+  const [submissionId] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : sessionStorage.getItem("submission_id")
+  );
 
   useEffect(() => {
     if (!submissionId) {
@@ -165,12 +175,21 @@ export default function ReviewPage() {
     setSubmitting(true);
     try {
       const result = await api.completeSubmission(submissionId);
+      // Stash the just-completed id in a ref so handleRatingSubmit can still
+      // post to the rating endpoint after we wipe sessionStorage right
+      // before navigating to /done.
+      submittedIdRef.current = submissionId;
       // /complete now runs the GPT-5 extraction in the background and returns
       // an empty placeholder, so prefer the preview extraction we already have
       // on this page (the one shown in the summary card). Only fall back to
       // the API result if for some reason we never got a preview.
       const extractionForDone = extraction ?? result.extraction;
       sessionStorage.setItem("extraction", JSON.stringify(extractionForDone));
+      // review_answers is no longer needed and only causes confusion if the
+      // user navigates back; the rest of the submission_id-keyed state stays
+      // until handleRatingSubmit / handleRatingSkip wipes it right before
+      // navigating to /done (clearing it here would re-trigger this effect's
+      // !submissionId guard and kick the user out mid-rating overlay).
       sessionStorage.removeItem("review_answers");
       trackEvent("survey_complete", {
         questions_answered: answeredQuestions.length,
@@ -186,21 +205,42 @@ export default function ReviewPage() {
     }
   };
 
+  // Wipe everything tied to the just-completed submission so any future
+  // navigation to /survey or /review (browser back, etc.) can't re-render
+  // stale data or re-fire previewExtraction against the completed id.
+  // /done only needs `extraction`, so that and analytics_session survive.
+  const wipeCompletedSubmissionState = () => {
+    sessionStorage.removeItem("submission_id");
+    sessionStorage.removeItem("question_data");
+    sessionStorage.removeItem("question_order");
+    sessionStorage.removeItem("edit_mode");
+    sessionStorage.removeItem("edit_question_id");
+  };
+
   const handleRatingSubmit = async (rating: number, feedback?: string) => {
-    if (!submissionId) return;
+    // Read from the ref (captured at submit time, before any sessionStorage
+    // wipe) so the rating still posts against the just-completed submission.
+    // Falls back to sessionStorage on the off-chance handleSubmit never ran.
+    const idForRating = submittedIdRef.current ?? submissionId;
+    if (!idForRating) return;
     setRatingSubmitting(true);
     trackEvent("experience_rating", { rating, has_feedback: !!feedback }, cohortId);
     try {
-      await api.submitExperienceRating(submissionId, rating, feedback);
+      await api.submitExperienceRating(idForRating, rating, feedback);
     } catch {
       // Rating save failed silently, don't block the user
     }
     setRatingSubmitting(false);
-    router.push(`/c/${cohortId}/done`);
+    wipeCompletedSubmissionState();
+    // Use replace (not push) so the now-submitted /review page is removed
+    // from history. The /done page also intercepts Back to redirect users
+    // to a fresh consent page rather than the half-completed review.
+    router.replace(`/c/${cohortId}/done`);
   };
 
   const handleRatingSkip = () => {
-    router.push(`/c/${cohortId}/done`);
+    wipeCompletedSubmissionState();
+    router.replace(`/c/${cohortId}/done`);
   };
 
   if (loading) {

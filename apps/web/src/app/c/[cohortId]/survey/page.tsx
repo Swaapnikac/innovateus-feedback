@@ -152,11 +152,53 @@ export default function SurveyPage() {
     const existingData = sessionStorage.getItem("question_data");
     if (existingData) {
       try {
-        setQuestions(JSON.parse(existingData));
+        const parsedQuestions: SurveyQuestion[] = JSON.parse(existingData);
+        setQuestions(parsedQuestions);
+
+        // Restore in-progress answers when the user returns to /survey via
+        // the browser (e.g. Back to consent → Forward, or Back from
+        // /review). The survey page's `answers` and `currentStep` live in
+        // React state, so without an explicit restore the user would land
+        // back on Q1 with an empty form even though `review_answers` is
+        // still in sessionStorage. Jump them to the first unanswered
+        // visible question so they can continue right where they left off.
+        const savedAnswers = sessionStorage.getItem("review_answers");
+        if (savedAnswers) {
+          try {
+            const restored: Record<string, AnswerState> = JSON.parse(savedAnswers);
+            setAnswers(restored);
+            answersRef.current = restored;
+            const visible = parsedQuestions.filter((q) => {
+              if (!q.condition) return true;
+              const dep = restored[q.condition.question_id];
+              if (!dep) return false;
+              if (q.condition.operator === "not_equals") {
+                return dep.value !== q.condition.value;
+              }
+              return dep.value === q.condition.value;
+            });
+            const firstUnanswered = visible.findIndex((q) => {
+              const a = restored[q.id];
+              if (!a) return true;
+              if (q.kind === "multi_select" || q.kind === "ranking") {
+                return !a.multiValues || a.multiValues.length === 0;
+              }
+              return !a.value;
+            });
+            setCurrentStep(
+              firstUnanswered >= 0
+                ? firstUnanswered
+                : Math.max(visible.length - 1, 0)
+            );
+          } catch {
+            // Corrupted review_answers — ignore and start fresh on Q1.
+          }
+        }
+
         setLoading(false);
         return;
       } catch {
-        // Corrupted — fall through to fetch fresh
+        // Corrupted question_data — fall through to fetch fresh.
         sessionStorage.removeItem("question_data");
       }
     }

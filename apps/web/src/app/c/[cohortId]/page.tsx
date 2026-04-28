@@ -26,17 +26,30 @@ export default function ConsentPage() {
   const [alreadySubmitted, setAlreadySubmitted] = useState(false);
 
   useEffect(() => {
-    // Reset the analytics session and all submission state for a fresh visit.
-    // Without this, a second form submission in the same tab reuses the old
-    // session token and looks like the same user in the funnel.
-    sessionStorage.removeItem("analytics_session");
-    sessionStorage.removeItem("submission_id");
-    sessionStorage.removeItem("question_data");
-    sessionStorage.removeItem("question_order");
-    sessionStorage.removeItem("review_answers");
-    sessionStorage.removeItem("extraction");
-    sessionStorage.removeItem("edit_mode");
-    sessionStorage.removeItem("edit_question_id");
+    // Only wipe in-progress survey state when the user has just submitted
+    // (we land here from /done's back-button popstate handler, which sets
+    // the flag). Otherwise preserve state so pressing Back during the
+    // survey doesn't destroy the user's in-progress answers — they should
+    // be able to press Forward and resume right where they were.
+    let justSubmitted = false;
+    try {
+      justSubmitted =
+        sessionStorage.getItem(`just_submitted_${cohortId}`) === "1";
+    } catch {
+      // sessionStorage may be disabled (e.g. private mode); silently skip.
+    }
+
+    if (justSubmitted) {
+      sessionStorage.removeItem("analytics_session");
+      sessionStorage.removeItem("submission_id");
+      sessionStorage.removeItem("question_data");
+      sessionStorage.removeItem("question_order");
+      sessionStorage.removeItem("review_answers");
+      sessionStorage.removeItem("extraction");
+      sessionStorage.removeItem("edit_mode");
+      sessionStorage.removeItem("edit_question_id");
+      sessionStorage.removeItem(`just_submitted_${cohortId}`);
+    }
 
     initSession();
     // Track both landing and consent — this page serves as the entry point.
@@ -46,6 +59,17 @@ export default function ConsentPage() {
 
   const handleStart = async () => {
     setLoading(true);
+    // Explicit Begin Survey click = fresh survey state. Clear any leftover
+    // answers/extractions from a previous in-progress or submitted run in
+    // this tab so a returning user doesn't see stale data attached to the
+    // new submission_id we're about to create. We deliberately do NOT
+    // touch analytics_session here so funnel analytics stay consistent.
+    sessionStorage.removeItem("question_data");
+    sessionStorage.removeItem("question_order");
+    sessionStorage.removeItem("review_answers");
+    sessionStorage.removeItem("extraction");
+    sessionStorage.removeItem("edit_mode");
+    sessionStorage.removeItem("edit_question_id");
     try {
       const { submission_id } = await api.startSubmission(cohortId);
       sessionStorage.setItem("submission_id", submission_id);

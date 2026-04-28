@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { InnovateLogo } from "@/components/InnovateLogo";
 import { ExtractionCard } from "@/components/ExtractionCard";
 import { CheckCircle2 } from "lucide-react";
@@ -10,6 +10,7 @@ import { initSession, trackPageView } from "@/lib/analytics";
 
 export default function DonePage() {
   const params = useParams();
+  const router = useRouter();
   const cohortId = params.cohortId as string;
   const [extraction] = useState<ExtractionResult | null>(() => {
     if (typeof window === "undefined") return null;
@@ -30,6 +31,32 @@ export default function DonePage() {
     // Focus the Thank You heading so screen-reader users hear the page change.
     headingRef.current?.focus();
   }, [cohortId]);
+
+  // Hijack the browser back button while the user is on /done. Without this,
+  // pressing Back lands the user on /review (or /survey) in a half-completed,
+  // already-submitted state, which is confusing. Instead we send them to the
+  // consent page, which clears all session state and shows a fresh form so
+  // they can take the survey again if they want.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // Push a sentinel history entry so a single Back press fires popstate
+    // here instead of actually navigating to the previous page.
+    window.history.pushState(null, "", window.location.href);
+    const handlePopstate = () => {
+      // Tell the consent page this navigation came from a successful
+      // submission so it knows to wipe any leftover in-progress state.
+      // Without this flag, the consent page leaves state alone (so that
+      // pressing Back during the survey is non-destructive).
+      try {
+        sessionStorage.setItem(`just_submitted_${cohortId}`, "1");
+      } catch {
+        // sessionStorage may be disabled (e.g. private mode); silently skip.
+      }
+      router.replace(`/c/${cohortId}`);
+    };
+    window.addEventListener("popstate", handlePopstate);
+    return () => window.removeEventListener("popstate", handlePopstate);
+  }, [cohortId, router]);
 
   return (
     <div className="min-h-screen bg-brand-light-blue/40">
