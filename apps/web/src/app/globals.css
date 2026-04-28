@@ -96,6 +96,11 @@
   }
   html {
     font-size: 18px;
+    /* WCAG 2.2 - 2.4.11 Focus Not Obscured (Minimum). Several pages use a
+       fixed bottom bar (PrivacyFooter ~64px, review submit bar ~80px); this
+       padding ensures the browser's auto-scroll on focus lands the focused
+       control above any fixed bottom UI on short viewports. */
+    scroll-padding-bottom: 6rem;
   }
   body {
     @apply bg-background text-foreground font-sans;

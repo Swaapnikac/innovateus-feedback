@@ -108,7 +108,7 @@ export function DragHandle({ attributes, listeners }: DragHandleProps) {
   return (
     <button
       type="button"
-      className="cursor-grab active:cursor-grabbing text-brand-blue/20 hover:text-brand-blue/50 shrink-0 p-0.5"
+      className="cursor-grab active:cursor-grabbing text-brand-blue/40 hover:text-brand-blue/60 shrink-0 p-1.5 min-h-6 min-w-6 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue"
       aria-label="Drag to reorder"
       {...attributes}
       {...(listeners || {})}

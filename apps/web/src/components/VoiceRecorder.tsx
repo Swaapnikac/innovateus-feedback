@@ -605,7 +605,7 @@ export const VoiceRecorder = forwardRef<VoiceRecorderHandle, VoiceRecorderProps>
               <button
                 type="button"
                 onClick={toggleOriginal}
-                className="flex items-center gap-1 text-xs text-brand-blue/50 hover:text-brand-blue/80"
+                className="flex items-center gap-1 text-xs text-brand-blue/60 hover:text-brand-blue/80 min-h-6 px-2 py-1 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue"
               >
                 {showingOriginal ? (
                   <><Sparkles className="h-3 w-3" /> Show enhanced</>
