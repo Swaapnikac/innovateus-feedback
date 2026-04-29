@@ -28,6 +28,9 @@ class Cohort(Base):
     __tablename__ = "cohorts"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Optional human-friendly identifier for sharing survey URLs
+    # (``/c/generative-ai``). Unique when set; falls back to UUID otherwise.
+    slug: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, unique=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     course_name: Mapped[str] = mapped_column(String(255), nullable=False)
     program_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)

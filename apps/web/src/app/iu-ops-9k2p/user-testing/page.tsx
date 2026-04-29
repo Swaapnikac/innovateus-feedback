@@ -202,7 +202,7 @@ function UserTestingAnalyticsContent() {
         if (v) params.set(k, v);
         else params.delete(k);
       }
-      router.replace(`/admin/user-testing?${params.toString()}`);
+      router.replace(`/iu-ops-9k2p/user-testing?${params.toString()}`);
     },
     [router, searchParams],
   );
@@ -232,7 +232,7 @@ function UserTestingAnalyticsContent() {
     if (typeof window !== "undefined") {
       const token = localStorage.getItem("admin_token");
       if (!token) {
-        router.replace("/admin/login");
+        router.replace("/iu-ops-9k2p/login");
         return;
       }
     }
@@ -447,7 +447,7 @@ function UserTestingAnalyticsContent() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => router.push("/admin/dashboard")}
+                onClick={() => router.push("/iu-ops-9k2p/dashboard")}
               >
                 Back to main dashboard
               </Button>

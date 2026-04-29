@@ -22,6 +22,7 @@ from app.services.ai_service import (
     detect_followup_needs_clarification,
     detect_and_redact_pii_with_ai,
 )
+from app.services.cohort_resolver import resolve_cohort
 from app.services.pii_service import strip_pii, strip_pii_with_meta
 from app.services.user_agent_service import parse_user_agent
 from app.config import get_settings
@@ -89,11 +90,14 @@ def _levenshtein(a: str, b: str) -> int:
 
 @router.post("/submissions/start", response_model=StartSubmissionResponse)
 async def start_submission(req: StartSubmissionRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Cohort).where(Cohort.id == req.cohort_id))
-    cohort = result.scalar_one_or_none()
+    # Accept either the UUID or the human-friendly slug, then operate on the
+    # resolved Cohort row. Every downstream lookup keys off ``cohort.id`` so
+    # the database storage shape never changes.
+    cohort = await resolve_cohort(db, req.cohort_id)
     if not cohort:
         raise HTTPException(status_code=404, detail="Cohort not found")
 
+    cohort_uuid = cohort.id
     client_ip = _get_client_ip(request)
     ip_hash = _hash_ip(client_ip)
     # ``max_submissions_per_ip`` is an explicit cap; 0 means "unlimited".
@@ -104,7 +108,7 @@ async def start_submission(req: StartSubmissionRequest, request: Request, db: As
         completed_q = await db.execute(
             select(Submission).where(
                 Submission.ip_hash == ip_hash,
-                Submission.cohort_id == req.cohort_id,
+                Submission.cohort_id == cohort_uuid,
                 Submission.status == "completed",
             )
         )
@@ -119,7 +123,7 @@ async def start_submission(req: StartSubmissionRequest, request: Request, db: As
     in_progress_q = await db.execute(
         select(Submission).where(
             Submission.ip_hash == ip_hash,
-            Submission.cohort_id == req.cohort_id,
+            Submission.cohort_id == cohort_uuid,
             Submission.status == "started",
         )
     )
@@ -131,7 +135,7 @@ async def start_submission(req: StartSubmissionRequest, request: Request, db: As
     now = datetime.now(timezone.utc)
     submission = Submission(
         id=uuid.uuid4(),
-        cohort_id=req.cohort_id,
+        cohort_id=cohort_uuid,
         status="started",
         consent_version=req.consent_version,
         survey_version=cohort.active_version,

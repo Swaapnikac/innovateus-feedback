@@ -117,6 +117,7 @@ async def editor_list_cohorts(db: AsyncSession = Depends(get_db)):
     return [
         {
             "id": str(c.id),
+            "slug": c.slug,
             "name": c.name,
             "course_name": c.course_name,
             "program_type": c.program_type,

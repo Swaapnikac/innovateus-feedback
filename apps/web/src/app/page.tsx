@@ -12,7 +12,10 @@ import {
   Sparkles,
 } from "lucide-react";
 
-const DEFAULT_COHORT_ID = process.env.NEXT_PUBLIC_DEFAULT_COHORT_ID || "00000000-0000-0000-0000-000000000001";
+// Default cohort that the marketing page links to. Defaults to the
+// human-friendly slug ``generative-ai`` so visitors land on a clean URL;
+// the backend resolves either a slug or the legacy UUID transparently.
+const DEFAULT_COHORT_ID = process.env.NEXT_PUBLIC_DEFAULT_COHORT_ID || "generative-ai";
 
 export default function HomePage() {
   return (

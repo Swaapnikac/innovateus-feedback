@@ -158,7 +158,7 @@ export default function PipelinesPage() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => router.push("/admin/dashboard")}
+          onClick={() => router.push("/iu-ops-9k2p/dashboard")}
           className="border-brand-blue/15 text-brand-blue/60 hover:bg-brand-blue/5 gap-2"
         >
           <ArrowLeft className="h-4 w-4" />

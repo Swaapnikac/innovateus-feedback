@@ -38,7 +38,10 @@ class SurveyConfig(BaseModel):
 
 
 class StartSubmissionRequest(BaseModel):
-    cohort_id: uuid.UUID
+    # Accepts either the UUID primary key or the cohort slug
+    # (``generative-ai``). The submissions router resolves the value before
+    # using it, so legacy clients passing UUIDs continue to work unchanged.
+    cohort_id: str
     consent_version: str = "1.0"
     client_metadata: Optional[dict] = None
 
@@ -210,6 +213,7 @@ class PaginatedResponses(BaseModel):
 
 class CohortResponse(BaseModel):
     id: uuid.UUID
+    slug: Optional[str] = None
     name: str
     course_name: str
     program_type: Optional[str] = None
@@ -221,6 +225,11 @@ class CreateCohortRequest(BaseModel):
     name: str
     course_name: str = ""
     program_type: str
+    # Optional human-friendly slug for the survey URL (``/c/<slug>``).
+    # When omitted the cohort is reachable via its UUID only, which matches
+    # legacy behaviour. When provided it must be lowercase alphanumeric +
+    # hyphen, 2-60 chars; admin endpoint validates and rejects collisions.
+    slug: Optional[str] = Field(None, max_length=80)
 
 
 class GenerateSurveyRequest(BaseModel):

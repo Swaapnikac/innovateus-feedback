@@ -53,8 +53,26 @@ export default function ReviewPage() {
 
   const [questions, setQuestions] = useState<SurveyQuestion[]>(loadStoredQuestions);
   const [answers] = useState<Record<string, StoredAnswer>>(loadStoredAnswers);
-  const [extraction, setExtraction] = useState<ExtractionResult | null>(null);
-  const [loadingExtraction, setLoadingExtraction] = useState(true);
+  // Hydrate from the cached preview if we have one and it's not flagged
+  // dirty (i.e. the user didn't actually edit anything since the last
+  // generation). This avoids a 13-20s GPT-5 re-run every time the user
+  // bounces /review → /survey → /review.
+  const [extraction, setExtraction] = useState<ExtractionResult | null>(() => {
+    if (typeof window === "undefined") return null;
+    if (sessionStorage.getItem("extraction_dirty") === "1") return null;
+    const cached = sessionStorage.getItem("review_extraction_cache");
+    if (!cached) return null;
+    try {
+      return JSON.parse(cached) as ExtractionResult;
+    } catch {
+      return null;
+    }
+  });
+  const [loadingExtraction, setLoadingExtraction] = useState(() => {
+    if (typeof window === "undefined") return true;
+    if (sessionStorage.getItem("extraction_dirty") === "1") return true;
+    return !sessionStorage.getItem("review_extraction_cache");
+  });
   const [submitting, setSubmitting] = useState(false);
   // Synchronous guard against double-submit: React state updates are batched,
   // so a second click can fire before `submitting` flips to true.
@@ -85,10 +103,32 @@ export default function ReviewPage() {
     setContext(cohortId, submissionId);
     trackPageView("review", cohortId);
 
-    // Fetch preview extraction
+    // Skip the network round-trip when we already have a fresh cached
+    // summary for this submission. The survey page sets
+    // ``extraction_dirty`` whenever an edit-return Save mutates answers,
+    // which forces a regeneration here.
+    const isDirty = sessionStorage.getItem("extraction_dirty") === "1";
+    const cachedRaw = sessionStorage.getItem("review_extraction_cache");
+    if (!isDirty && cachedRaw) {
+      try {
+        const cached = JSON.parse(cachedRaw) as ExtractionResult;
+        setExtraction(cached);
+        setLoadingExtraction(false);
+        return;
+      } catch {
+        // Fall through to network fetch.
+      }
+    }
+
     api.previewExtraction(submissionId).then((result) => {
       setExtraction(result.extraction);
       setLoadingExtraction(false);
+      try {
+        sessionStorage.setItem("review_extraction_cache", JSON.stringify(result.extraction));
+        sessionStorage.removeItem("extraction_dirty");
+      } catch {
+        // Best-effort cache; quota errors shouldn't break the page.
+      }
     }).catch(() => {
       setLoadingExtraction(false);
     });
@@ -215,6 +255,8 @@ export default function ReviewPage() {
     sessionStorage.removeItem("question_order");
     sessionStorage.removeItem("edit_mode");
     sessionStorage.removeItem("edit_question_id");
+    sessionStorage.removeItem("review_extraction_cache");
+    sessionStorage.removeItem("extraction_dirty");
   };
 
   const handleRatingSubmit = async (rating: number, feedback?: string) => {

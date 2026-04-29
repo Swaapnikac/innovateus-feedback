@@ -68,6 +68,7 @@ import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContai
 
 interface CohortItem {
   id: string;
+  slug: string | null;
   name: string;
   course_name: string;
   program_type: string | null;
@@ -311,7 +312,7 @@ export default function DashboardPage() {
       setResponses(responsesData);
       setAnalytics(analyticsData);
     } catch {
-      router.push("/admin/login");
+      router.push("/iu-ops-9k2p/login");
     } finally {
       setLoading(false);
     }
@@ -324,7 +325,7 @@ export default function DashboardPage() {
         setCohorts(data as CohortItem[]);
         setLoading(false);
       }).catch(() => {
-        router.push("/admin/login");
+        router.push("/iu-ops-9k2p/login");
       });
     };
     fetchCohorts();
@@ -502,11 +503,17 @@ export default function DashboardPage() {
 
   const handleLogout = () => {
     localStorage.removeItem("admin_token");
-    router.push("/admin/login");
+        router.push("/iu-ops-9k2p/login");
   };
 
-  const getSurveyLink = (cohortId: string) =>
-    `${window.location.origin}/c/${cohortId}`;
+  // Prefer a cohort's slug when available so the URL is shareable
+  // (``/c/generative-ai``); fall back to the UUID for legacy cohorts that
+  // don't have one yet. Backend resolves either form.
+  const getSurveyLink = (cohortId: string) => {
+    const cohort = cohorts.find((c) => c.id === cohortId);
+    const segment = cohort?.slug || cohortId;
+    return `${window.location.origin}/c/${segment}`;
+  };
 
   const copyLink = (cohortId: string) => {
     navigator.clipboard.writeText(getSurveyLink(cohortId));
@@ -616,11 +623,11 @@ export default function DashboardPage() {
             <Plus className="h-4 w-4" />
             New Survey
           </Button>
-          <Button variant="outline" size="sm" onClick={() => router.push("/admin/user-testing")} className="border-brand-blue/20 text-brand-blue hover:bg-brand-blue/5 gap-2">
+          <Button variant="outline" size="sm" onClick={() => router.push("/iu-ops-9k2p/user-testing")} className="border-brand-blue/20 text-brand-blue hover:bg-brand-blue/5 gap-2">
             <Sparkles className="h-4 w-4" />
             User Testing
           </Button>
-          <Button variant="outline" size="sm" onClick={() => router.push("/admin/pipelines")} className="border-brand-teal/20 text-brand-teal hover:bg-brand-teal/5 gap-2">
+          <Button variant="outline" size="sm" onClick={() => router.push("/iu-ops-9k2p/pipelines")} className="border-brand-teal/20 text-brand-teal hover:bg-brand-teal/5 gap-2">
             <GitBranch className="h-4 w-4" />
             Pipelines
           </Button>
@@ -695,7 +702,21 @@ export default function DashboardPage() {
                       />
                     </div>
                     <div className="space-y-2 min-w-0">
-                      <p className="text-sm font-semibold text-brand-blue">{selectedSurveyName}</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold text-brand-blue">{selectedSurveyName}</p>
+                        {(() => {
+                          const cohort = cohorts.find((c) => c.id === selectedSurvey);
+                          if (!cohort?.slug) return null;
+                          return (
+                            <Badge
+                              variant="secondary"
+                              className="bg-brand-teal/10 text-brand-teal border-0 font-mono text-[11px]"
+                            >
+                              /c/{cohort.slug}
+                            </Badge>
+                          );
+                        })()}
+                      </div>
                       <div className="flex items-center gap-2">
                         <Input
                           readOnly
@@ -717,7 +738,7 @@ export default function DashboardPage() {
                           size="sm"
                           variant="outline"
                           className="gap-2 border-brand-dark-yellow/20 text-brand-dark-yellow hover:bg-brand-yellow/10 text-xs"
-                          onClick={() => router.push(`/admin/editor?cohort=${selectedSurvey}`)}
+                          onClick={() => router.push(`/iu-ops-9k2p/editor?cohort=${selectedSurvey}`)}
                         >
                           <Settings className="h-3.5 w-3.5" />
                           Survey Editor
@@ -1776,7 +1797,7 @@ export default function DashboardPage() {
         onOpenChange={setShowNewProgram}
         onCreated={handleSurveyCreated}
         primaryActionLabel="Open Survey in Editor"
-        onPrimaryAction={(cohort) => router.push(`/admin/editor?cohort=${cohort.id}`)}
+        onPrimaryAction={(cohort) => router.push(`/iu-ops-9k2p/editor?cohort=${cohort.id}`)}
       />
 
       {/* ── Delete Responses Confirmation Dialog ── */}

@@ -105,6 +105,9 @@ export interface QuestionGroup {
 
 export interface SurveyConfig {
   cohort_id: string;
+  // Returned by GET /v1/survey/{key} when the cohort has a friendly slug.
+  // Frontend uses ``slug || cohort_id`` to build shareable URLs.
+  slug?: string | null;
   survey: {
     version: string;
     title: string;
@@ -541,14 +544,18 @@ export const api = {
   },
 
   getCohorts: () =>
-    request<Array<{ id: string; name: string; course_name: string; program_type: string | null; max_submissions_per_ip: number; created_at: string }>>(
+    request<Array<{ id: string; slug: string | null; name: string; course_name: string; program_type: string | null; max_submissions_per_ip: number; created_at: string }>>(
       "/v1/admin/cohorts"
     ),
 
-  createCohort: (name: string, programType: string) =>
-    request<{ id: string; name: string; course_name: string; program_type: string | null; max_submissions_per_ip: number; created_at: string }>("/v1/admin/cohorts", {
+  createCohort: (name: string, programType: string, slug?: string) =>
+    request<{ id: string; slug: string | null; name: string; course_name: string; program_type: string | null; max_submissions_per_ip: number; created_at: string }>("/v1/admin/cohorts", {
       method: "POST",
-      body: JSON.stringify({ name, program_type: programType }),
+      body: JSON.stringify({
+        name,
+        program_type: programType,
+        ...(slug ? { slug } : {}),
+      }),
     }),
 
   deleteAllResponses: (cohortId?: string) => {
@@ -564,7 +571,7 @@ export const api = {
     }),
 
   duplicateCohort: (cohortId: string) =>
-    request<{ id: string; name: string; course_name: string; program_type: string | null; max_submissions_per_ip: number; created_at: string }>(
+    request<{ id: string; slug: string | null; name: string; course_name: string; program_type: string | null; max_submissions_per_ip: number; created_at: string }>(
       `/v1/admin/cohorts/${cohortId}/duplicate`,
       { method: "POST" }
     ),
@@ -582,7 +589,7 @@ export const api = {
     }),
 
   getEditorCohorts: () =>
-    request<Array<{ id: string; name: string; course_name: string; program_type: string | null; max_submissions_per_ip: number; created_at: string }>>(
+    request<Array<{ id: string; slug: string | null; name: string; course_name: string; program_type: string | null; max_submissions_per_ip: number; created_at: string }>>(
       "/v1/admin/editor/cohorts"
     ),
 

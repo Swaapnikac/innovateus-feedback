@@ -580,7 +580,7 @@ function EditorPageContent() {
       setPrograms(data);
       return data;
     } catch {
-      router.push("/admin/editor/login");
+      router.push("/iu-ops-9k2p/editor/login");
       return [];
     }
   }, [router]);
@@ -607,7 +607,7 @@ function EditorPageContent() {
         setActiveVersion(data.active_version ?? null);
         loadVersionHistory(programId);
       } catch {
-        router.push("/admin/editor/login");
+        router.push("/iu-ops-9k2p/editor/login");
       }
     },
     [router, loadVersionHistory]
@@ -849,7 +849,7 @@ function EditorPageContent() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => router.push("/admin/dashboard")}
+            onClick={() => router.push("/iu-ops-9k2p/dashboard")}
             className="border-brand-blue/15 text-brand-blue/60 hover:bg-brand-blue/5 gap-2"
           >
             <ArrowLeft className="h-4 w-4" />

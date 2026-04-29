@@ -74,6 +74,12 @@ export default function SurveyPage() {
   const answersRef = useRef<Record<string, AnswerState>>({});
   // Ref to the FollowUpPanel so we can flush any unsaved typed text on Next click
   const followUpPanelRef = useRef<FollowUpPanelHandle>(null);
+  // Idempotency guard for the mount effect. React Strict Mode invokes mount
+  // effects twice in dev, and the second invocation must NOT undo the first
+  // run's edit-target navigation. Without this, the second pass falls into
+  // the "existingData" branch below and overwrites currentStep with
+  // firstUnanswered — which made every Edit button open the same question.
+  const mountInitDoneRef = useRef(false);
 
   const submissionId = typeof window !== "undefined" ? sessionStorage.getItem("submission_id") : null;
 
@@ -82,6 +88,9 @@ export default function SurveyPage() {
       router.replace(`/c/${cohortId}`);
       return;
     }
+
+    if (mountInitDoneRef.current) return;
+    mountInitDoneRef.current = true;
 
     const editMode = typeof window !== "undefined" ? sessionStorage.getItem("edit_mode") : null;
     const editQuestionId = typeof window !== "undefined" ? sessionStorage.getItem("edit_question_id") : null;
@@ -98,8 +107,10 @@ export default function SurveyPage() {
         } catch {}
       }
 
-      sessionStorage.removeItem("edit_mode");
-      sessionStorage.removeItem("edit_question_id");
+      // We deliberately leave ``edit_mode`` / ``edit_question_id`` in
+      // sessionStorage until the edit-return Save handler runs (handleNext),
+      // so a refresh mid-edit lands the user back on the same question
+      // rather than jumping to firstUnanswered.
 
       // Use stored question data (full objects in original randomized order) so
       // we never re-randomize by calling the API again.
@@ -180,7 +191,7 @@ export default function SurveyPage() {
             const firstUnanswered = visible.findIndex((q) => {
               const a = restored[q.id];
               if (!a) return true;
-              if (q.kind === "multi_select" || q.kind === "ranking") {
+              if (q.type === "multi" || q.type === "ranking") {
                 return !a.multiValues || a.multiValues.length === 0;
               }
               return !a.value;
@@ -389,6 +400,13 @@ export default function SurveyPage() {
         updatedAnswers[currentQuestion.id] = { ...(updatedAnswers[currentQuestion.id] || defaultAnswer), ...overrides };
       }
       sessionStorage.setItem("review_answers", JSON.stringify(updatedAnswers));
+      // Edit complete — clear the targeting flags so a subsequent /survey
+      // visit (e.g. browser Back) doesn't reopen this question, and signal
+      // that the review page must regenerate the AI summary because
+      // answers actually changed.
+      sessionStorage.removeItem("edit_mode");
+      sessionStorage.removeItem("edit_question_id");
+      sessionStorage.setItem("extraction_dirty", "1");
       setEditReturnMode(false);
       router.push(`/c/${cohortId}/review`);
       return;

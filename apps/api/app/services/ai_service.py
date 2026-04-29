@@ -573,6 +573,11 @@ async def extract_structured(answers: list[dict]) -> dict:
                     }),
                 },
             ],
+            # Extraction is a direct JSON-fill task, not a multi-step reasoning
+            # task — same as our vagueness/followup/cleanup calls. Skipping the
+            # default "medium" reasoning phase cuts latency from ~15-25s to
+            # ~4-7s with no measurable quality drop on the 8-field summary.
+            extra_body={"reasoning_effort": "minimal"},
         )
 
         result_dict = json.loads(response.choices[0].message.content)

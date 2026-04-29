@@ -46,6 +46,8 @@ export default function ConsentPage() {
       sessionStorage.removeItem("question_order");
       sessionStorage.removeItem("review_answers");
       sessionStorage.removeItem("extraction");
+      sessionStorage.removeItem("review_extraction_cache");
+      sessionStorage.removeItem("extraction_dirty");
       sessionStorage.removeItem("edit_mode");
       sessionStorage.removeItem("edit_question_id");
       sessionStorage.removeItem(`just_submitted_${cohortId}`);
@@ -68,6 +70,8 @@ export default function ConsentPage() {
     sessionStorage.removeItem("question_order");
     sessionStorage.removeItem("review_answers");
     sessionStorage.removeItem("extraction");
+    sessionStorage.removeItem("review_extraction_cache");
+    sessionStorage.removeItem("extraction_dirty");
     sessionStorage.removeItem("edit_mode");
     sessionStorage.removeItem("edit_question_id");
     try {

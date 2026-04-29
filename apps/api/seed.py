@@ -11,6 +11,7 @@ from app.db import async_session
 from app.models import Cohort, SurveyConfigVersion
 
 DEFAULT_COHORT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+DEFAULT_COHORT_SLUG = "generative-ai"
 SURVEY_CONFIG_PATH = Path(__file__).resolve().parents[2] / "docs" / "survey-config" / "survey-en.json"
 
 
@@ -31,8 +32,9 @@ async def seed():
         if not existing:
             cohort = Cohort(
                 id=DEFAULT_COHORT_ID,
-                name="Pilot Cohort 1",
-                course_name="Generative AI for Government",
+                slug=DEFAULT_COHORT_SLUG,
+                name="Using Generative AI at Work",
+                course_name="Using Generative AI at Work",
                 survey_config=default_survey,
                 active_version="v1",
                 max_submissions_per_ip=1,
@@ -50,11 +52,22 @@ async def seed():
             )
             session.add(version)
             await session.commit()
-            print(f"Seeded cohort: Pilot Cohort 1 ({DEFAULT_COHORT_ID})")
+            print(
+                f"Seeded cohort: Using Generative AI at Work "
+                f"(/c/{DEFAULT_COHORT_SLUG} -> {DEFAULT_COHORT_ID})"
+            )
         else:
+            # Refresh survey config every run so dev/seed always reflects the
+            # latest survey-en.json. Also backfill the slug for environments
+            # that pre-date migration 006.
             existing.survey_config = default_survey
+            if not existing.slug:
+                existing.slug = DEFAULT_COHORT_SLUG
             await session.commit()
-            print(f"Updated survey_config for: {existing.name}")
+            print(
+                f"Updated survey_config for: {existing.name} "
+                f"(/c/{existing.slug or existing.id})"
+            )
 
 
 if __name__ == "__main__":

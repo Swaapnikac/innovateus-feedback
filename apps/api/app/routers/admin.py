@@ -42,6 +42,7 @@ from app.services.export_service import (
     generate_user_testing_csv,
 )
 from app.services.ai_service import analyze_open_responses, compare_survey_responses
+from app.services.cohort_resolver import is_valid_slug, slugify
 from app.services.metrics_service import compute_user_testing_metrics
 
 router = APIRouter()
@@ -249,6 +250,7 @@ async def list_cohorts(db: AsyncSession = Depends(get_db)):
     return [
         CohortResponse(
             id=c.id,
+            slug=c.slug,
             name=c.name,
             course_name=c.course_name,
             program_type=c.program_type,
@@ -259,6 +261,33 @@ async def list_cohorts(db: AsyncSession = Depends(get_db)):
         )
         for c in cohorts
     ]
+
+
+async def _resolve_unique_slug(
+    db: AsyncSession, candidate: Optional[str], fallback_name: str
+) -> Optional[str]:
+    """Validate a user-supplied slug, or auto-generate one.
+
+    Returns ``None`` when neither a slug nor a slugifiable name is provided
+    (cohort then resolves by UUID only). Raises 400 on collision so the admin
+    can pick a different value rather than silently overwriting somebody
+    else's URL.
+    """
+    raw = (candidate or "").strip().lower() or slugify(fallback_name or "")
+    if not raw:
+        return None
+    if not is_valid_slug(raw):
+        raise HTTPException(
+            status_code=400,
+            detail="Slug must be 2-60 chars, lowercase letters/digits/hyphen only",
+        )
+    existing = await db.execute(select(Cohort.id).where(Cohort.slug == raw))
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Slug '{raw}' is already in use; pick a different one",
+        )
+    return raw
 
 
 @router.post("/cohorts", response_model=CohortResponse, dependencies=[Depends(require_editor)])
@@ -272,9 +301,11 @@ async def create_cohort(req: CreateCohortRequest, db: AsyncSession = Depends(get
     }
 
     course_name = req.course_name or req.name
+    slug = await _resolve_unique_slug(db, req.slug, req.name)
 
     cohort = Cohort(
         id=cohort_id,
+        slug=slug,
         name=req.name,
         course_name=course_name,
         program_type=req.program_type,
@@ -287,6 +318,7 @@ async def create_cohort(req: CreateCohortRequest, db: AsyncSession = Depends(get
 
     return CohortResponse(
         id=cohort_id,
+        slug=slug,
         name=req.name,
         course_name=course_name,
         program_type=req.program_type,
@@ -544,8 +576,29 @@ async def duplicate_cohort(cohort_id: uuid.UUID, db: AsyncSession = Depends(get_
         "question_groups": [],
     }
 
+    # Auto-derive a slug for the copy when the source had one. Append an
+    # incrementing ``-copy``/``-copy-2``/``-copy-3`` suffix until we find
+    # something free so duplicating never collides with an existing slug.
+    new_slug: Optional[str] = None
+    if source.slug:
+        base = f"{source.slug}-copy"
+        candidate = base
+        n = 2
+        while True:
+            existing = await db.execute(select(Cohort.id).where(Cohort.slug == candidate))
+            if existing.scalar_one_or_none() is None:
+                new_slug = candidate
+                break
+            candidate = f"{base}-{n}"
+            n += 1
+            if n > 100:
+                # Pathological — fall back to no slug rather than spin forever.
+                new_slug = None
+                break
+
     new_cohort = Cohort(
         id=new_id,
+        slug=new_slug,
         name=new_name,
         course_name=source.course_name,
         program_type=source.program_type,
@@ -574,6 +627,7 @@ async def duplicate_cohort(cohort_id: uuid.UUID, db: AsyncSession = Depends(get_
 
     return CohortResponse(
         id=new_id,
+        slug=new_slug,
         name=new_name,
         course_name=source.course_name,
         program_type=source.program_type,

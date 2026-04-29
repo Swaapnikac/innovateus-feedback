@@ -23,7 +23,7 @@ export default function EditorLoginPage() {
     try {
       const result = await api.editorLogin(password);
       localStorage.setItem("editor_token", result.token);
-      router.push("/admin/editor");
+      router.push("/iu-ops-9k2p/editor");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {

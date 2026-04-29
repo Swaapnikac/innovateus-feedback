@@ -23,7 +23,7 @@ export default function AdminLoginPage() {
     try {
       const result = await api.adminLogin(password);
       localStorage.setItem("admin_token", result.token);
-      router.push("/admin/dashboard");
+      router.push("/iu-ops-9k2p/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {

@@ -1,13 +1,11 @@
 import copy
 import json
 import random
-import uuid
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Response, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from app.db import get_db
-from app.models import Cohort
+from app.services.cohort_resolver import resolve_cohort
 
 router = APIRouter()
 
@@ -80,10 +78,16 @@ def _fix_conditional_order(questions: list[dict]) -> None:
                 break
 
 
-@router.get("/survey/{cohort_id}")
-async def get_survey(cohort_id: uuid.UUID, response: Response, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Cohort).where(Cohort.id == cohort_id))
-    cohort = result.scalar_one_or_none()
+@router.get("/survey/{cohort_key}")
+async def get_survey(cohort_key: str, response: Response, db: AsyncSession = Depends(get_db)):
+    """Public endpoint serving a cohort's survey config.
+
+    ``cohort_key`` may be either the UUID primary key or the human-friendly
+    slug (``/c/generative-ai``). The response always returns the canonical
+    UUID in ``cohort_id`` so the frontend can use it for all subsequent API
+    calls (start, save answer, complete, etc.) without needing to re-resolve.
+    """
+    cohort = await resolve_cohort(db, cohort_key)
     if not cohort:
         raise HTTPException(status_code=404, detail="Cohort not found")
 
@@ -97,4 +101,8 @@ async def get_survey(cohort_id: uuid.UUID, response: Response, db: AsyncSession 
     config = _randomize_within_groups(config)
 
     response.headers["Cache-Control"] = "no-store"
-    return {"cohort_id": str(cohort_id), "survey": config}
+    return {
+        "cohort_id": str(cohort.id),
+        "slug": cohort.slug,
+        "survey": config,
+    }
