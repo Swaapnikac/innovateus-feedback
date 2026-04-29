@@ -4,7 +4,7 @@ import { useState, useImperativeHandle, forwardRef, useEffect, useRef } from "re
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { MessageCircle, SkipForward, Mic, Type, Pencil, Loader2 } from "lucide-react";
-import { VoiceRecorder } from "./VoiceRecorder";
+import { VoiceRecorder, type VoiceRecorderHandle } from "./VoiceRecorder";
 import { PiiWarning } from "./PiiWarning";
 import { trackInputModeSwitched } from "@/lib/analytics";
 import { MAX_ANSWER_CHARS } from "@/lib/limits";
@@ -49,8 +49,32 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
 }, ref) {
   const followupQid = (index: number) =>
     questionId ? `${questionId}_followup_${index + 1}` : `followup_${index + 1}`;
+  // Mirrors the OpenEndedQuestion pattern: holds the active follow-up
+  // VoiceRecorder so we can flush an in-flight transcript before it
+  // unmounts on voice → text. Without this, a participant who is
+  // mid-recording on a follow-up and switches to Type loses everything
+  // they just spoke.
+  const followupRecorderRef = useRef<VoiceRecorderHandle | null>(null);
   const switchMode = (idx: number, mode: "text" | "voice") => {
     setInputMode((prev) => {
+      if (prev === "voice" && mode === "text" && followupRecorderRef.current) {
+        const pending = followupRecorderRef.current.flushCurrentTranscript();
+        // Always adopt the recorder's transcript when it differs from
+        // the current answer — the recorder is the source of truth for
+        // what voice has captured, including a re-recording on top of a
+        // previously confirmed value. Refusing to overwrite when
+        // ``answers[idx]`` was non-empty caused: re-record → switch to
+        // text shows the OLD answer → switch back to voice resets to the
+        // OLD answer via ``initialTranscript`` and silently discards
+        // the new recording.
+        if (pending && pending.trim()) {
+          setAnswers((prevAnswers) => {
+            const existing = prevAnswers[idx] ?? "";
+            if (existing === pending) return prevAnswers;
+            return { ...prevAnswers, [idx]: pending.slice(0, MAX_ANSWER_CHARS) };
+          });
+        }
+      }
       if (prev !== mode) {
         try {
           trackInputModeSwitched(followupQid(idx), prev, mode, "followup");
@@ -424,6 +448,7 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
             ) : (
               <div className="space-y-2">
                 <VoiceRecorder
+                  ref={followupRecorderRef}
                   onTranscriptComplete={handleTranscriptComplete}
                   initialTranscript={answers[i] || ""}
                   questionId={followupQid(i)}

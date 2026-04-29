@@ -66,6 +66,12 @@ export default function ConsentPage() {
     // this tab so a returning user doesn't see stale data attached to the
     // new submission_id we're about to create. We deliberately do NOT
     // touch analytics_session here so funnel analytics stay consistent.
+    //
+    // submission_id MUST be cleared first so a failed startSubmission
+    // (network/5xx) can never leave a previous tab's id in storage —
+    // otherwise the next /survey load would silently write into the
+    // wrong submission record.
+    sessionStorage.removeItem("submission_id");
     sessionStorage.removeItem("question_data");
     sessionStorage.removeItem("question_order");
     sessionStorage.removeItem("review_answers");

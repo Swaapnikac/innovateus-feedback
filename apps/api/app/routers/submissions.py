@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 import hashlib
 import logging
@@ -197,25 +198,45 @@ async def save_answer(submission_id: uuid.UUID, req: AnswerRequest, db: AsyncSes
     # so the governance dashboard reflects reality. The AI layer catches
     # free-form PII (names, contextual addresses) that regex cannot; if it
     # fails or there's no API key it silently falls back to regex-only.
+    #
+    # All independent fields are scrubbed in parallel via ``asyncio.gather``
+    # so a voice answer with two follow-ups doesn't pay 5x serial round
+    # trips. Redaction counts/categories are aggregated centrally afterwards.
     _redaction_count = 0
     _redaction_cats: set[str] = set()
 
-    async def _scrub(value: str | None) -> str | None:
-        nonlocal _redaction_count, _redaction_cats
+    async def _scrub_one(value: str | None) -> tuple[str | None, int, list[str]]:
         if value is None:
-            return None
+            return None, 0, []
         if not value.strip():
-            return value
+            return value, 0, []
         redacted, count, cats = await detect_and_redact_pii_with_ai(value)
-        if count:
-            _redaction_count += count
-            _redaction_cats.update(cats)
-        return redacted
+        return redacted, count, cats
 
-    answer_raw = await _scrub(req.answer_raw)
-    transcript = await _scrub(req.transcript)
-    followup_1_answer = await _scrub(req.followup_1_answer) if req.followup_1_answer else None
-    followup_2_answer = await _scrub(req.followup_2_answer) if req.followup_2_answer else None
+    (
+        (answer_raw, _ar_count, _ar_cats),
+        (transcript, _tr_count, _tr_cats),
+        (transcript_raw_scrubbed, _trr_count, _trr_cats),
+        (followup_1_answer, _f1_count, _f1_cats),
+        (followup_2_answer, _f2_count, _f2_cats),
+    ) = await asyncio.gather(
+        _scrub_one(req.answer_raw),
+        _scrub_one(req.transcript),
+        _scrub_one(req.transcript_raw),
+        _scrub_one(req.followup_1_answer) if req.followup_1_answer else _scrub_one(None),
+        _scrub_one(req.followup_2_answer) if req.followup_2_answer else _scrub_one(None),
+    )
+
+    for _count, _cats in (
+        (_ar_count, _ar_cats),
+        (_tr_count, _tr_cats),
+        (_trr_count, _trr_cats),
+        (_f1_count, _f1_cats),
+        (_f2_count, _f2_cats),
+    ):
+        if _count:
+            _redaction_count += _count
+            _redaction_cats.update(_cats)
 
     now = datetime.now(timezone.utc)
     is_open = (req.question_type or "").lower() in _OPEN_TYPES
@@ -259,12 +280,11 @@ async def save_answer(submission_id: uuid.UUID, req: AnswerRequest, db: AsyncSes
         if previous_answer and previous_answer != (answer_raw or ""):
             existing.changed_answer_flag = True
         if req.transcript_raw is not None:
-            scrubbed_raw = await _scrub(req.transcript_raw)
-            existing.transcript_raw = scrubbed_raw
+            existing.transcript_raw = transcript_raw_scrubbed
             existing.transcript_final = answer_raw
             if req.transcript_raw and answer_raw and req.transcript_raw != answer_raw:
                 existing.transcript_edit_distance = _levenshtein(
-                    scrubbed_raw or "", answer_raw or ""
+                    transcript_raw_scrubbed or "", answer_raw or ""
                 )
                 existing.user_edited_transcript_flag = True
                 existing.edited_after_transcription_flag = True
@@ -311,13 +331,13 @@ async def save_answer(submission_id: uuid.UUID, req: AnswerRequest, db: AsyncSes
             followup_1_word_count=fu1_word_count,
             followup_2_word_count=fu2_word_count,
             answer_skipped=bool(req.answer_skipped),
-            transcript_raw=await _scrub(req.transcript_raw) if req.transcript_raw else None,
+            transcript_raw=transcript_raw_scrubbed if req.transcript_raw else None,
             transcript_final=answer_raw if req.transcript_raw else None,
             voice_duration_sec=req.voice_duration_sec,
         )
         if req.transcript_raw and answer_raw and req.transcript_raw != answer_raw:
             answer.transcript_edit_distance = _levenshtein(
-                (await _scrub(req.transcript_raw)) or "", answer_raw or ""
+                transcript_raw_scrubbed or "", answer_raw or ""
             )
             answer.user_edited_transcript_flag = True
             answer.edited_after_transcription_flag = True

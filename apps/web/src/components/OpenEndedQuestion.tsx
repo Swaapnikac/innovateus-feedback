@@ -48,9 +48,17 @@ export function OpenEndedQuestion({
     // B7: when switching voice → text, pull whatever transcript the recorder
     // is holding (confirmed, enhanced, raw, or mid-recording live) before it
     // unmounts, so in-flight voice work is preserved in the text area.
+    //
+    // We always adopt the recorder's current transcript when it differs
+    // from ``value`` — the recorder is the source of truth for what voice
+    // has produced, including a re-recording on top of a previously
+    // confirmed answer. Without this, switching back to text after a
+    // re-record would show the OLD value, and re-entering voice would
+    // then reset to the OLD value via ``initialTranscript`` and silently
+    // discard the user's new recording.
     if (inputMode === "voice" && mode === "text" && voiceRef.current) {
       const pending = voiceRef.current.flushCurrentTranscript();
-      if (pending && pending.trim() && !value.trim()) {
+      if (pending && pending.trim() && pending !== value) {
         onChange(pending.slice(0, MAX_ANSWER_CHARS));
       }
     }

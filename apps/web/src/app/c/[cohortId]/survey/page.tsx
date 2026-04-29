@@ -52,10 +52,30 @@ export default function SurveyPage() {
   const [currentStep, setCurrentStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, AnswerState>>({});
   const [loading, setLoading] = useState(true);
+  // Surfaces a "Couldn't load — Retry" shell when GET /v1/survey fails.
+  // Without this, a single bad request leaves the user staring at an
+  // infinite spinner with no way to recover short of a full reload.
+  const [loadError, setLoadError] = useState(false);
+  // Bumping this re-runs the mount effect (which is the load path) so the
+  // Retry button doesn't need its own duplicate fetch logic.
+  const [retryCount, setRetryCount] = useState(0);
   const [saving, setSaving] = useState(false);
   const [showFollowups, setShowFollowups] = useState(false);
   const [checkingVagueness, setCheckingVagueness] = useState(false);
   const [checkingFollowupVagueness, setCheckingFollowupVagueness] = useState(false);
+  // Single in-flight guard for the entire ``handleNext`` pipeline so a
+  // user double-clicking Next during the PII / vagueness AI gate can't
+  // fire two parallel runs. Uses BOTH a ref (synchronous re-entry block)
+  // and a state (so the Button can re-render disabled). ``checkingVagueness``
+  // alone wasn't enough because it isn't set until after ``api.checkPii``
+  // resolves, leaving a ~1-2s window where Next remained clickable.
+  const nextInFlightRef = useRef(false);
+  const [nextInFlight, setNextInFlight] = useState(false);
+  // F8: surface silent saveAnswer failures so a user whose connection
+  // dropped mid-survey doesn't sail through to the review screen
+  // believing every answer was persisted. Auto-clears on the next
+  // successful save.
+  const [saveError, setSaveError] = useState(false);
   const [editReturnMode, setEditReturnMode] = useState(false);
   const [irrelevantError, setIrrelevantError] = useState("");
   // Surface when an AI check fails so the user can retry instead of silently
@@ -91,6 +111,10 @@ export default function SurveyPage() {
 
     if (mountInitDoneRef.current) return;
     mountInitDoneRef.current = true;
+
+    // Clear any prior load error so the spinner shows on retry instead of
+    // the error shell.
+    setLoadError(false);
 
     const editMode = typeof window !== "undefined" ? sessionStorage.getItem("edit_mode") : null;
     const editQuestionId = typeof window !== "undefined" ? sessionStorage.getItem("edit_question_id") : null;
@@ -153,6 +177,12 @@ export default function SurveyPage() {
         setCurrentStep(idx >= 0 ? idx : 0);
         setEditReturnMode(true);
         setLoading(false);
+      }).catch(() => {
+        // Network/server failure: surface a Retry shell instead of a
+        // permanent spinner. The retry button bumps retryCount which
+        // re-runs this effect.
+        setLoading(false);
+        setLoadError(true);
       });
       return;
     }
@@ -219,6 +249,12 @@ export default function SurveyPage() {
       sessionStorage.setItem("question_order", JSON.stringify(data.survey.questions.map((q: SurveyQuestion) => q.id)));
       sessionStorage.setItem("question_data", JSON.stringify(data.survey.questions));
       setLoading(false);
+    }).catch(() => {
+      // First-load failure → show Retry shell. Without this catch, the
+      // page would hang on the loading spinner forever on a single bad
+      // network request.
+      setLoading(false);
+      setLoadError(true);
     });
 
     initSession();
@@ -228,7 +264,10 @@ export default function SurveyPage() {
       // Fire-and-forget — captures browser/OS/device for H6 compatibility.
       void sendClientEnv(submissionId);
     }
-  }, [cohortId, submissionId, router]);
+  // retryCount is here so the Retry button can re-run this whole effect
+  // without us having to duplicate the load logic in a separate handler.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cohortId, submissionId, router, retryCount]);
 
   const visibleQuestions = questions.filter((q) => {
     if (!q.condition) return true;
@@ -373,6 +412,8 @@ export default function SurveyPage() {
         followup_2: ans.followups?.[1],
         followup_2_answer: ans.followupAnswers?.followup_2_answer,
       });
+      // Successful save — clear any previously surfaced save error.
+      setSaveError(false);
       trackEvent("question_answer", {
         question_id: currentQuestion.id,
         question_type: currentQuestion.type,
@@ -380,7 +421,10 @@ export default function SurveyPage() {
         has_answer: !!rawValue,
       }, cohortId);
     } catch {
-      // Silently fail — answer will be retried on next navigation
+      // F8: surface the failure so the user knows the answer didn't
+      // persist. We still let them advance — the next save will retry
+      // and clear the banner if it succeeds.
+      setSaveError(true);
     } finally {
       setSaving(false);
     }
@@ -426,6 +470,22 @@ export default function SurveyPage() {
   }, [saveCurrentAnswer, currentStep, visibleQuestions.length, cohortId, router, editReturnMode, currentQuestion, defaultAnswer]);
 
   const handleNext = async () => {
+    if (!currentQuestion) return;
+    // Synchronous re-entry block: the second click of a double-click
+    // arrives in the same tick before React has had a chance to flip
+    // ``nextInFlight`` to true and re-render the disabled button.
+    if (nextInFlightRef.current) return;
+    nextInFlightRef.current = true;
+    setNextInFlight(true);
+    try {
+      await runHandleNext();
+    } finally {
+      nextInFlightRef.current = false;
+      setNextInFlight(false);
+    }
+  };
+
+  const runHandleNext = async () => {
     if (!currentQuestion) return;
     setIrrelevantError("");
     setAiCheckError("");
@@ -636,8 +696,12 @@ export default function SurveyPage() {
         followup_2: ans.followups?.[1],
         followup_2_answer: followupAnswers.followup_2_answer,
       });
+      setSaveError(false);
     } catch {
-      // Silently fail — will retry on main save
+      // F8: same banner as the main save site so a follow-up that
+      // failed to persist (e.g. mid-survey network drop) is visible to
+      // the participant rather than silently lost.
+      setSaveError(true);
     }
   }, [currentQuestion, submissionId, cohortId]);
 
@@ -757,6 +821,33 @@ export default function SurveyPage() {
     (currentQuestion ? getAnswer(currentQuestion.id).followups : undefined) ??
     pendingFollowupsRef.current ??
     undefined;
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-brand-light-blue/40 flex items-center justify-center px-6">
+        <div role="alert" className="max-w-md text-center space-y-4">
+          <h1 className="text-xl font-serif text-brand-blue">
+            We couldn&apos;t load the survey
+          </h1>
+          <p className="text-sm text-brand-blue/70">
+            Check your connection and try again. Your progress is saved.
+          </p>
+          <Button
+            type="button"
+            onClick={() => {
+              setLoadError(false);
+              setLoading(true);
+              mountInitDoneRef.current = false;
+              setRetryCount((n) => n + 1);
+            }}
+            className="bg-brand-blue hover:bg-brand-blue/90"
+          >
+            Try again
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -945,6 +1036,28 @@ export default function SurveyPage() {
           </div>
         )}
 
+        {saveError && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="max-w-3xl mx-auto bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-3"
+          >
+            <span className="text-amber-600 text-lg shrink-0" aria-hidden="true">!</span>
+            <div>
+              <p className="text-sm text-amber-700">
+                Your last answer didn&apos;t save. Check your connection — we&apos;ll keep retrying as you continue.
+              </p>
+              <button
+                type="button"
+                onClick={() => setSaveError(false)}
+                className="text-xs text-amber-500 hover:text-amber-700 mt-1 underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {aiCheckError && (
           <div
             role="alert"
@@ -1000,18 +1113,21 @@ export default function SurveyPage() {
             onClick={handleNext}
             // B4: also block Next while the F2 follow-up vagueness check is
             // in flight so users can't escape mid-evaluation.
-            disabled={!isCurrentValid() || saving || checkingVagueness || checkingFollowupVagueness}
+            // F7: ``nextInFlight`` covers the whole handleNext pipeline,
+            // including the early PII check window before ``checkingVagueness``
+            // is set, so a double-click can't fire parallel runs.
+            disabled={!isCurrentValid() || saving || checkingVagueness || checkingFollowupVagueness || nextInFlight}
             className="gap-2 bg-brand-blue hover:bg-brand-blue/90 shadow-sm"
           >
-            {(checkingVagueness || checkingFollowupVagueness) && <Loader2 className="h-4 w-4 motion-safe:animate-spin" />}
-            {checkingVagueness || checkingFollowupVagueness
+            {(checkingVagueness || checkingFollowupVagueness || nextInFlight) && <Loader2 className="h-4 w-4 motion-safe:animate-spin" />}
+            {checkingVagueness || checkingFollowupVagueness || nextInFlight
               ? "Analyzing..."
               : editReturnMode
                 ? "Back to Review"
                 : currentStep === visibleQuestions.length - 1
                   ? "Review"
                   : "Next"}
-            {!(checkingVagueness || checkingFollowupVagueness) && <ChevronRight className="h-4 w-4" />}
+            {!(checkingVagueness || checkingFollowupVagueness || nextInFlight) && <ChevronRight className="h-4 w-4" />}
           </Button>
         </div>
       </main>
