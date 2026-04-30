@@ -12,7 +12,7 @@ import re
 import uuid
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import any_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Cohort
@@ -66,5 +66,14 @@ async def resolve_cohort(db: AsyncSession, key: str) -> Optional[Cohort]:
     if not is_valid_slug(str(key)):
         return None
 
-    result = await db.execute(select(Cohort).where(Cohort.slug == key))
+    # Match either the current slug or any historical alias in
+    # ``previous_slugs`` so renames never break old QR codes or shared links.
+    result = await db.execute(
+        select(Cohort).where(
+            or_(
+                Cohort.slug == key,
+                key == any_(Cohort.previous_slugs),
+            )
+        )
+    )
     return result.scalar_one_or_none()

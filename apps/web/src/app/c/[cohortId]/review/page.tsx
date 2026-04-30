@@ -139,10 +139,17 @@ export default function ReviewPage() {
     api.getSurvey(cohortId).then((data) => {
       setQuestions(data.survey.questions);
       setLoading(false);
+      // Canonicalize the URL if the user reached us via an old/historical
+      // slug (one that lives in ``previous_slugs``). The /review page is
+      // typically reached after the survey, but a returning user might
+      // bookmark or refresh it under the legacy URL.
+      if (data.slug && data.slug !== cohortId) {
+        router.replace(`/c/${data.slug}/review`);
+      }
     }).catch(() => {
       setLoading(false);
     });
-  }, [cohortId, submissionId, questions.length]);
+  }, [cohortId, submissionId, questions.length, router]);
 
   // Filter to visible questions (respect conditions)
   const visibleQuestions = questions.filter((q) => {

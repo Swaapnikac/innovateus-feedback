@@ -57,7 +57,27 @@ export default function ConsentPage() {
     // Track both landing and consent — this page serves as the entry point.
     trackPageView("landing", cohortId);
     trackPageView("consent", cohortId);
-  }, [cohortId]);
+
+    // If the URL was reached via an old/historical slug (one that lives in
+    // the cohort's ``previous_slugs`` aliases), the survey API still returns
+    // the row but with the *current* canonical slug in the response. Detect
+    // that mismatch and replace the URL so the address bar shows the new
+    // canonical link instead of the legacy one. Uses replace() — not push() —
+    // so the back button doesn't bounce between the two URLs.
+    api
+      .getSurvey(cohortId)
+      .then((cfg) => {
+        const canonical = cfg.slug;
+        if (canonical && canonical !== cohortId) {
+          router.replace(`/c/${canonical}`);
+        }
+      })
+      .catch(() => {
+        // Cohort not found / network error — silently ignore here. The
+        // user-visible failure path is handleStart, which surfaces a
+        // proper error message.
+      });
+  }, [cohortId, router]);
 
   const handleStart = async () => {
     setLoading(true);

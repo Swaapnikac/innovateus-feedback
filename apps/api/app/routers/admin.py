@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, func
+from sqlalchemy import select, delete, func, or_, any_
 from app.db import get_db
 from app.models import (
     Answer,
@@ -646,7 +646,51 @@ async def update_cohort_settings(cohort_id: uuid.UUID, req: CohortSettingsReques
         raise HTTPException(status_code=404, detail="Cohort not found")
 
     cohort.max_submissions_per_ip = req.max_submissions_per_ip
-    return {"status": "updated", "max_submissions_per_ip": req.max_submissions_per_ip}
+
+    slug_changed = False
+    if req.slug is not None:
+        raw = req.slug.strip().lower()
+        if not raw:
+            raise HTTPException(
+                status_code=400,
+                detail="Slug cannot be empty. Leave the field unchanged to keep the current URL.",
+            )
+        if raw != (cohort.slug or ""):
+            if not is_valid_slug(raw):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Slug must be 2-60 chars, lowercase letters/digits/hyphen only",
+                )
+            # Union uniqueness: reject if another cohort uses this value as
+            # its current slug OR has it stored as a historical alias.
+            collision = await db.execute(
+                select(Cohort.id).where(
+                    Cohort.id != cohort.id,
+                    or_(
+                        Cohort.slug == raw,
+                        raw == any_(Cohort.previous_slugs),
+                    ),
+                )
+            )
+            if collision.scalar_one_or_none() is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"URL '/c/{raw}' is already in use or was previously used by another survey",
+                )
+            # Preserve the old slug as an alias so legacy QR codes / shared
+            # links keep resolving to this same cohort.
+            if cohort.slug and cohort.slug not in (cohort.previous_slugs or []):
+                cohort.previous_slugs = [*(cohort.previous_slugs or []), cohort.slug]
+            cohort.slug = raw
+            slug_changed = True
+
+    return {
+        "status": "updated",
+        "max_submissions_per_ip": cohort.max_submissions_per_ip,
+        "slug": cohort.slug,
+        "slug_changed": slug_changed,
+        "previous_slugs": list(cohort.previous_slugs or []),
+    }
 
 
 @router.get("/qualtrics/status", dependencies=[Depends(require_admin)])

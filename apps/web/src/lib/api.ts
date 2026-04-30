@@ -576,8 +576,17 @@ export const api = {
       { method: "POST" }
     ),
 
-  updateCohortSettings: (cohortId: string, settings: { max_submissions_per_ip: number }) =>
-    request<{ status: string; max_submissions_per_ip: number }>(`/v1/admin/cohorts/${cohortId}/settings`, {
+  updateCohortSettings: (
+    cohortId: string,
+    settings: { max_submissions_per_ip: number; slug?: string }
+  ) =>
+    request<{
+      status: string;
+      max_submissions_per_ip: number;
+      slug: string | null;
+      slug_changed: boolean;
+      previous_slugs: string[];
+    }>(`/v1/admin/cohorts/${cohortId}/settings`, {
       method: "POST",
       body: JSON.stringify(settings),
     }),

@@ -52,6 +52,8 @@ import {
   Calendar,
   Brain,
   Sparkles,
+  Pencil,
+  Link as LinkIcon,
 } from "lucide-react";
 import {
   api,
@@ -62,6 +64,7 @@ import {
 } from "@/lib/api";
 import { InnovateLogo } from "@/components/InnovateLogo";
 import { NewSurveyDialog, type CreatedCohort } from "@/components/NewSurveyDialog";
+import { EditSurveyLinkDialog } from "@/components/EditSurveyLinkDialog";
 import { QuestionStatsCard } from "@/components/QuestionStatsCard";
 import { QRCodeSVG } from "qrcode.react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from "recharts";
@@ -72,6 +75,10 @@ interface CohortItem {
   name: string;
   course_name: string;
   program_type: string | null;
+  // Needed by EditSurveyLinkDialog because the backend's
+  // ``/cohorts/{id}/settings`` endpoint requires ``max_submissions_per_ip``
+  // in the same request body as the optional slug update.
+  max_submissions_per_ip: number;
 }
 
 interface ResponseItem {
@@ -148,6 +155,10 @@ export default function DashboardPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [linkCopied, setLinkCopied] = useState(false);
+  // Cohort whose URL is being renamed / first-time assigned. ``null`` =
+  // dialog closed. The dialog itself adapts its title based on whether the
+  // cohort already has a slug.
+  const [editingLinkCohortId, setEditingLinkCohortId] = useState<string | null>(null);
 
   // ── Segment filter state ──
   const [segmentQ, setSegmentQ] = useState<string>("");
@@ -706,14 +717,38 @@ export default function DashboardPage() {
                         <p className="text-sm font-semibold text-brand-blue">{selectedSurveyName}</p>
                         {(() => {
                           const cohort = cohorts.find((c) => c.id === selectedSurvey);
-                          if (!cohort?.slug) return null;
+                          if (!cohort) return null;
+                          if (cohort.slug) {
+                            return (
+                              <span className="inline-flex items-center gap-1">
+                                <Badge
+                                  variant="secondary"
+                                  className="bg-brand-teal/10 text-brand-teal border-0 font-mono text-[11px]"
+                                >
+                                  /c/{cohort.slug}
+                                </Badge>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingLinkCohortId(cohort.id)}
+                                  className="rounded p-1 text-brand-blue/50 hover:bg-brand-blue/5 hover:text-brand-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
+                                  aria-label={`Edit URL for ${cohort.name}`}
+                                  title="Edit URL"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                              </span>
+                            );
+                          }
                           return (
-                            <Badge
-                              variant="secondary"
-                              className="bg-brand-teal/10 text-brand-teal border-0 font-mono text-[11px]"
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-6 gap-1 rounded-full border-brand-blue/20 px-2 text-[11px] text-brand-blue hover:bg-brand-blue/5"
+                              onClick={() => setEditingLinkCohortId(cohort.id)}
                             >
-                              /c/{cohort.slug}
-                            </Badge>
+                              <LinkIcon className="h-3 w-3" />
+                              Add custom URL
+                            </Button>
                           );
                         })()}
                       </div>
@@ -1799,6 +1834,31 @@ export default function DashboardPage() {
         primaryActionLabel="Open Survey in Editor"
         onPrimaryAction={(cohort) => router.push(`/iu-ops-9k2p/editor?cohort=${cohort.id}`)}
       />
+
+      {/* ── Edit Survey Link Dialog (rename slug or assign for the first time) ── */}
+      {(() => {
+        const editingCohort = cohorts.find((c) => c.id === editingLinkCohortId);
+        if (!editingCohort) return null;
+        return (
+          <EditSurveyLinkDialog
+            open={!!editingLinkCohortId}
+            onOpenChange={(open) => {
+              if (!open) setEditingLinkCohortId(null);
+            }}
+            cohortId={editingCohort.id}
+            cohortName={editingCohort.name}
+            currentSlug={editingCohort.slug}
+            maxSubmissionsPerIp={editingCohort.max_submissions_per_ip}
+            onUpdated={(newSlug) => {
+              setCohorts((prev) =>
+                prev.map((c) =>
+                  c.id === editingCohort.id ? { ...c, slug: newSlug } : c
+                )
+              );
+            }}
+          />
+        );
+      })()}
 
       {/* ── Delete Responses Confirmation Dialog ── */}
       <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>

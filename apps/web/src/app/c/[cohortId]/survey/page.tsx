@@ -103,6 +103,28 @@ export default function SurveyPage() {
 
   const submissionId = typeof window !== "undefined" ? sessionStorage.getItem("submission_id") : null;
 
+  // Canonicalize the URL when the user reached us via a historical alias
+  // (an old slug stored in ``previous_slugs``). The survey API echoes the
+  // current slug back, so a mismatch with the URL param means we should
+  // ``router.replace()`` to the canonical URL. Runs once per mount and is
+  // independent of the question-loading logic below.
+  const canonicalizedRef = useRef(false);
+  useEffect(() => {
+    if (canonicalizedRef.current) return;
+    canonicalizedRef.current = true;
+    api
+      .getSurvey(cohortId)
+      .then((cfg) => {
+        if (cfg.slug && cfg.slug !== cohortId) {
+          router.replace(`/c/${cfg.slug}/survey`);
+        }
+      })
+      .catch(() => {
+        // Network failure here is non-fatal — the main load logic below
+        // surfaces its own retry UI.
+      });
+  }, [cohortId, router]);
+
   useEffect(() => {
     if (!submissionId) {
       router.replace(`/c/${cohortId}`);

@@ -239,7 +239,15 @@ class GenerateSurveyRequest(BaseModel):
 
 
 class CohortSettingsRequest(BaseModel):
+    # Existing setting; defaults preserve current behaviour for callers that
+    # only want to update the IP cap.
     max_submissions_per_ip: int = 1
+    # Optional rename / first-time assignment of the public survey slug.
+    # When provided and different from the current slug, the admin endpoint
+    # validates format, checks union uniqueness against every cohort's
+    # current and historical slugs, and appends the old slug to
+    # ``previous_slugs`` so old links still resolve.
+    slug: Optional[str] = Field(None, max_length=80)
 
 
 class EditorLoginRequest(BaseModel):

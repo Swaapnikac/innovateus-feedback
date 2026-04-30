@@ -7,7 +7,7 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 from sqlalchemy import String, Text, Integer, Float, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 from app.db import Base
 import enum
 
@@ -31,6 +31,15 @@ class Cohort(Base):
     # Optional human-friendly identifier for sharing survey URLs
     # (``/c/generative-ai``). Unique when set; falls back to UUID otherwise.
     slug: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, unique=True, index=True)
+    # Historical slugs kept as redirect aliases so old QR codes / printed
+    # links never break after a rename. ``resolve_cohort`` matches against
+    # either ``slug`` or any element of this array.
+    previous_slugs: Mapped[list[str]] = mapped_column(
+        ARRAY(String(80)),
+        nullable=False,
+        default=list,
+        server_default="{}",
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     course_name: Mapped[str] = mapped_column(String(255), nullable=False)
     program_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
