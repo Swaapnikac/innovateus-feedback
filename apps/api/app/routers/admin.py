@@ -526,8 +526,11 @@ async def delete_all_responses(cohort_id: Optional[uuid.UUID] = None, db: AsyncS
             await db.delete(sub)
 
     # Also delete all events for this cohort (landing, consent, survey_start, etc.)
+    # Match every identifier the cohort has ever been tagged with so we don't
+    # leave orphan events behind when participants arrived via slug URLs.
     if cohort_id:
-        await db.execute(delete(Event).where(Event.cohort_id == str(cohort_id)))
+        identifiers = await _cohort_event_identifiers(db, cohort_id)
+        await db.execute(delete(Event).where(Event.cohort_id.in_(identifiers)))
     else:
         await db.execute(delete(Event))
 
@@ -551,7 +554,12 @@ async def delete_cohort(cohort_id: uuid.UUID, db: AsyncSession = Depends(get_db)
         await db.execute(delete(Answer).where(Answer.submission_id.in_(sub_ids)))
         await db.execute(delete(Submission).where(Submission.cohort_id == cohort_id))
 
-    await db.execute(delete(Event).where(Event.cohort_id == str(cohort_id)))
+    # Match every identifier the cohort has ever been tagged with — UUID,
+    # current slug, and any historical alias — so deleting the cohort
+    # doesn't leave orphan events behind for participants who arrived via
+    # slug URLs.
+    identifiers = await _cohort_event_identifiers(db, cohort_id)
+    await db.execute(delete(Event).where(Event.cohort_id.in_(identifiers)))
     await db.execute(delete(SurveyConfigVersion).where(SurveyConfigVersion.cohort_id == cohort_id))
     await db.delete(cohort)
 
@@ -745,6 +753,32 @@ async def qualtrics_sync_all(
     return {"total": total, "synced": synced, "failed": failed, "errors": errors}
 
 
+async def _cohort_event_identifiers(
+    db: AsyncSession, cohort_id: uuid.UUID
+) -> list[str]:
+    """Return every string a participant might have tagged events with for
+    this cohort: the UUID, the current slug, and every historical alias.
+
+    Events store ``cohort_id`` as a string of whatever the URL carried at
+    event time, so the same cohort can show up under multiple identifiers
+    (UUID + slug + old aliases). Analytics, response deletion, and cohort
+    deletion all need to operate across the full set, otherwise events
+    tagged via slug URLs get silently dropped (undercounted analytics) or
+    leaked as orphans (after cohort delete). Union uniqueness on slug
+    renames guarantees no two cohorts ever share an identifier here, so
+    this is safe.
+    """
+    cohort_row = await db.scalar(select(Cohort).where(Cohort.id == cohort_id))
+    identifiers: list[str] = [str(cohort_id)]
+    if cohort_row is not None:
+        if cohort_row.slug:
+            identifiers.append(cohort_row.slug)
+        for alias in cohort_row.previous_slugs or []:
+            if alias and alias not in identifiers:
+                identifiers.append(alias)
+    return identifiers
+
+
 async def _get_events_for_cohort(
     db: AsyncSession,
     cohort_id: Optional[uuid.UUID],
@@ -753,7 +787,8 @@ async def _get_events_for_cohort(
 ) -> list[dict]:
     q = select(Event)
     if cohort_id:
-        q = q.where(Event.cohort_id == str(cohort_id))
+        identifiers = await _cohort_event_identifiers(db, cohort_id)
+        q = q.where(Event.cohort_id.in_(identifiers))
     if start:
         q = q.where(Event.timestamp >= start)
     if end:
