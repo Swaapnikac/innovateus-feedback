@@ -35,12 +35,15 @@ from app.config import get_settings
 from app.services.export_service import (
     SubmissionBundle,
     build_bundles,
+    generate_qualtrics_csv,
     generate_raw_csv,
     generate_structured_csv,
     generate_summary_pdf,
     generate_summary_pptx,
     generate_user_testing_csv,
 )
+from app.services import qualtrics_mapper
+from app.services.qualtrics_mapper import QualtricsConfigError
 from app.services.ai_service import analyze_open_responses, compare_survey_responses
 from app.services.cohort_resolver import is_valid_slug, slugify
 from app.services.metrics_service import compute_user_testing_metrics
@@ -473,6 +476,49 @@ async def export_structured_csv(
     )
 
 
+@router.get("/export/qualtrics.csv", dependencies=[Depends(require_admin)])
+async def export_qualtrics_csv(
+    cohort_id: Optional[uuid.UUID] = None,
+    start: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    target: Optional[str] = Query(None, description="Override cohort/env target: production | test"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Qualtrics-importable CSV (3-row header) for the selected cohort/range.
+
+    Open-ended answers are merged with their AI follow-ups into the main
+    question column. Per-question voice/text/mixed/blank indicator and a
+    ``source_interface`` column are appended.
+    """
+    cohort = None
+    if cohort_id:
+        cohort = (await db.execute(select(Cohort).where(Cohort.id == cohort_id))).scalar_one_or_none()
+
+    try:
+        resolved = qualtrics_mapper.resolve_target(cohort, override=target)
+    except QualtricsConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    bundles = await _get_bundles_for_filters(db, cohort_id, start, end, include_started=False)
+    bundles = [b for b in bundles if b.submission.status == "completed"]
+    bundles.sort(key=lambda b: b.submission.created_at or datetime.min.replace(tzinfo=timezone.utc))
+    _, _, survey_config = await _get_cohort_meta(db, cohort_id)
+
+    import logging as _logging
+    _logging.getLogger(__name__).info(
+        "qualtrics.csv.generated bundles=%d target=%s cohort_id=%s",
+        len(bundles), resolved.name, cohort_id,
+    )
+
+    csv_data = generate_qualtrics_csv(bundles, target=resolved, survey_config=survey_config)
+    filename = f"qualtrics_{resolved.name}_export.csv"
+    return StreamingResponse(
+        iter([csv_data]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 @router.get("/export/summary.pdf", dependencies=[Depends(require_admin)])
 async def export_summary_pdf(
     cohort_id: Optional[uuid.UUID] = None,
@@ -704,11 +750,62 @@ async def update_cohort_settings(cohort_id: uuid.UUID, req: CohortSettingsReques
 @router.get("/qualtrics/status", dependencies=[Depends(require_admin)])
 def qualtrics_status():
     s = get_settings()
-    configured = bool(s.qualtrics_api_token and s.qualtrics_survey_id and s.qualtrics_datacenter_id)
+    token_set = bool(s.qualtrics_api_token)
+    prod_set = bool(s.qualtrics_production_survey_id and s.qualtrics_production_datacenter_id)
+    test_set = bool(
+        (s.qualtrics_test_survey_id or s.qualtrics_survey_id)
+        and (s.qualtrics_test_datacenter_id or s.qualtrics_datacenter_id)
+    )
     return {
-        "configured": configured,
-        "survey_id": s.qualtrics_survey_id or None,
-        "datacenter_id": s.qualtrics_datacenter_id or None,
+        "configured": token_set and (prod_set or test_set),
+        "default_target": s.qualtrics_default_target,
+        "production": {
+            "configured": token_set and prod_set,
+            "survey_id": s.qualtrics_production_survey_id or None,
+            "datacenter_id": s.qualtrics_production_datacenter_id or None,
+        },
+        "test": {
+            "configured": token_set and test_set,
+            "survey_id": (s.qualtrics_test_survey_id or s.qualtrics_survey_id) or None,
+            "datacenter_id": (s.qualtrics_test_datacenter_id or s.qualtrics_datacenter_id) or None,
+        },
+    }
+
+
+@router.get("/qualtrics/validate", dependencies=[Depends(require_admin)])
+async def qualtrics_validate(
+    cohort_id: Optional[uuid.UUID] = None,
+    target: Optional[str] = Query(None, description="Override target: production | test"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pre-flight check for sync / Qualtrics CSV download.
+
+    Returns ``{ok, target, survey_id, datacenter_id, errors[], warnings[]}``.
+    Warnings are non-fatal (e.g., missing recode for one option). Errors
+    block sync — the dashboard surfaces them as a toast/alert.
+    """
+    cohort = None
+    if cohort_id:
+        cohort = (await db.execute(select(Cohort).where(Cohort.id == cohort_id))).scalar_one_or_none()
+
+    _, _, survey_config = await _get_cohort_meta(db, cohort_id)
+    questions = list((survey_config or {}).get("questions") or [])
+    if not questions:
+        # Fall back to default config so a brand-new cohort can still validate
+        try:
+            with open(DEFAULT_SURVEY_PATH, "r", encoding="utf-8") as f:
+                questions = list(json.load(f).get("questions") or [])
+        except FileNotFoundError:
+            questions = []
+
+    report = qualtrics_mapper.validate_for_cohort(cohort, questions, override=target)
+    return {
+        "ok": report.ok,
+        "target": report.target,
+        "survey_id": report.survey_id,
+        "datacenter_id": report.datacenter_id,
+        "errors": report.errors,
+        "warnings": report.warnings,
     }
 
 

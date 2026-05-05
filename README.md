@@ -289,3 +289,22 @@ alembic upgrade head
 | `CORS_ORIGINS` | Allowed CORS origins (comma-separated) |
 | `NEXT_PUBLIC_API_URL` | Backend URL for frontend |
 | `ENVIRONMENT` | `development` or `production` |
+
+### Qualtrics sync (optional)
+
+The Public Voice tool can push completed submissions into a Qualtrics survey
+via the Response Import API and produce a Qualtrics-importable CSV from the
+admin dashboard. Both surfaces share the same per-question mapping defined
+in `docs/survey-config/survey-en.json` under each question's `qualtrics`
+block (separate `production` and `test` entries).
+
+| Variable | Description |
+|---|---|
+| `QUALTRICS_API_TOKEN` | Single shared API token (leave blank to disable Qualtrics) |
+| `QUALTRICS_PRODUCTION_SURVEY_ID` | Live survey ID, e.g. `SV_9HOhdI843TgDv14` |
+| `QUALTRICS_PRODUCTION_DATACENTER_ID` | Live datacenter, e.g. `co1` |
+| `QUALTRICS_TEST_SURVEY_ID` | Test/dev survey ID |
+| `QUALTRICS_TEST_DATACENTER_ID` | Test datacenter |
+| `QUALTRICS_DEFAULT_TARGET` | `production` or `test` — picked when a cohort has no `qualtrics_target` override |
+
+A cohort can override the default with `Cohort.qualtrics_target` (`production` | `test` | `none`), which lets a single environment run smoke-test cohorts against the test survey while live cohorts go to production. Open-ended answers are always combined with their AI follow-ups into the main question's response — follow-up text never appears as a separate Qualtrics column.

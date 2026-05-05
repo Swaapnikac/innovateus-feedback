@@ -233,10 +233,16 @@ def _question_columns(answer: Optional[Answer], question: dict, order: int) -> d
     q_id = question.get("id") or ""
     q_text = question.get("text") or ""
     q_type = question.get("type") or ""
+    q_category = "OPEN" if q_type.lower() in {"open", "voice"} else "CLOSE"
     cols: dict = {
         "question_id": q_id,
         "question_text": q_text,
         "question_type": q_type,
+        # OPEN / CLOSE — capitalised analyst-facing marker. Sits next to
+        # ``question_type`` (which carries the technical type like
+        # ``rating`` / ``mcq`` / ``open``) so both audiences are served
+        # without renaming the existing column.
+        "question_category": q_category,
         "question_order": order,
         "section_name": question.get("group") or "",
         "block_name": question.get("group") or "",
@@ -564,13 +570,17 @@ def generate_raw_csv(
         _device_columns(_empty_bundle_for_headers()).keys()
     )
 
-    # Per-question columns (prefixed by q1_, q2_, ...)
+    # Per-question columns (prefixed by q1_OPEN_, q2_CLOSE_, ...). The
+    # OPEN / CLOSE marker in the header makes it visible at a glance which
+    # block is free-text vs constrained — handy when the CSV runs to
+    # hundreds of columns and the survey question text is long.
     question_col_keys = list(
         _question_columns(None, {"id": "", "text": "", "type": "", "required": False}, 1).keys()
     )
     per_q_headers: list[str] = []
     for idx, q in enumerate(questions, 1):
-        prefix = f"q{idx}_"
+        marker = "OPEN" if (q.get("type") or "").lower() in {"open", "voice"} else "CLOSE"
+        prefix = f"q{idx}_{marker}_"
         per_q_headers.extend(prefix + k for k in question_col_keys)
 
     rollup_keys = list(_submission_rollup_columns(_empty_bundle_for_headers()).keys())
@@ -855,6 +865,43 @@ def generate_user_testing_csv(bundles: list[SubmissionBundle]) -> str:
             _bool_to_str(flags["h5_voice_natural_support_flag"]) if flags["h5_voice_natural_support_flag"] is not None else "",
             _bool_to_str(flags["h6_device_compatibility_support_flag"]) if flags["h6_device_compatibility_support_flag"] is not None else "",
         ]
+        writer.writerow(row)
+
+    return output.getvalue()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Qualtrics CSV — Qualtrics-importable shape, 3-row header.
+#
+# Same row set as raw/structured (one row per submission), but column shape
+# matches what Qualtrics emits for this survey so the file round-trips back
+# via Response Import. Open-ended answers + their AI follow-ups are merged
+# into the main question column; follow-up text never gets its own column.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def generate_qualtrics_csv(
+    bundles: list[SubmissionBundle],
+    target,  # qualtrics_mapper.ResolvedTarget
+    survey_config: Optional[dict] = None,
+) -> str:
+    from app.services import qualtrics_mapper
+
+    questions = _questions_from_config(survey_config)
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    for header_row in qualtrics_mapper.build_qualtrics_csv_headers(questions, target):
+        writer.writerow(header_row)
+
+    for bundle in bundles:
+        row = qualtrics_mapper.build_qualtrics_csv_row(
+            submission=bundle.submission,
+            answers=bundle.answers,
+            cohort=bundle.cohort,
+            questions=questions,
+            target=target,
+        )
         writer.writerow(row)
 
     return output.getvalue()

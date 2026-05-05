@@ -359,8 +359,10 @@ export const api = {
       followups_asked?: number;
       followup_1?: string;
       followup_1_answer?: string;
+      followup_1_input_mode?: string;
       followup_2?: string;
       followup_2_answer?: string;
+      followup_2_input_mode?: string;
     }
   ) =>
     request<{ id: string; question_id: string }>(
@@ -705,13 +707,15 @@ export const api = {
     return request<CompareInsights>(`/v1/admin/compare-insights?${query}`);
   },
 
-  exportUrl: (type: "raw.csv" | "structured.csv" | "summary.pdf" | "summary.pptx" | "user-testing.csv", params?: {
-    cohort_id?: string; start?: string; end?: string;
-  }) => {
+  exportUrl: (
+    type: "raw.csv" | "structured.csv" | "summary.pdf" | "summary.pptx" | "user-testing.csv" | "qualtrics.csv",
+    params?: { cohort_id?: string; start?: string; end?: string; target?: string },
+  ) => {
     const query = new URLSearchParams();
     if (params?.cohort_id) query.set("cohort_id", params.cohort_id);
     if (params?.start) query.set("start", params.start);
     if (params?.end) query.set("end", params.end);
+    if (params?.target) query.set("target", params.target);
     return `${API_URL}/v1/admin/export/${type}?${query}`;
   },
 
@@ -727,9 +731,26 @@ export const api = {
     ),
 
   getQualtricsStatus: () =>
-    request<{ configured: boolean; survey_id: string | null; datacenter_id: string | null }>(
-      "/v1/admin/qualtrics/status"
-    ),
+    request<{
+      configured: boolean;
+      default_target: string;
+      production: { configured: boolean; survey_id: string | null; datacenter_id: string | null };
+      test: { configured: boolean; survey_id: string | null; datacenter_id: string | null };
+    }>("/v1/admin/qualtrics/status"),
+
+  validateQualtrics: (params?: { cohort_id?: string; target?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.cohort_id) query.set("cohort_id", params.cohort_id);
+    if (params?.target) query.set("target", params.target);
+    return request<{
+      ok: boolean;
+      target: string | null;
+      survey_id: string | null;
+      datacenter_id: string | null;
+      errors: string[];
+      warnings: string[];
+    }>(`/v1/admin/qualtrics/validate?${query}`);
+  },
 
   syncQualtrics: (submissionId: string) =>
     request<{ status: string; submission_id: string; error: string | null }>(

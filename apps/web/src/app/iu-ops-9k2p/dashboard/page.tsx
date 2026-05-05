@@ -484,7 +484,32 @@ export default function DashboardPage() {
     setPage(1);
   };
 
-  const handleExport = async (type: "raw.csv" | "structured.csv" | "summary.pdf" | "summary.pptx" | "user-testing.csv") => {
+  const handleExport = async (
+    type: "raw.csv" | "structured.csv" | "summary.pdf" | "summary.pptx" | "user-testing.csv" | "qualtrics.csv",
+  ) => {
+    // Qualtrics export must validate config first — without QIDs / token /
+    // datacenter we'd silently emit an unusable file. The validate endpoint
+    // returns a list of fixable issues which we surface via alert (the
+    // existing dashboard-wide error pattern; sonner is not wired in here).
+    if (type === "qualtrics.csv") {
+      try {
+        const report = await api.validateQualtrics({ cohort_id: selectedSurvey || undefined });
+        if (!report.ok) {
+          alert(`Cannot export Qualtrics CSV — fix these first:\n\n${report.errors.join("\n")}`);
+          return;
+        }
+        if (report.warnings.length) {
+          const proceed = window.confirm(
+            `Qualtrics export warnings:\n\n${report.warnings.join("\n")}\n\nProceed anyway?`,
+          );
+          if (!proceed) return;
+        }
+      } catch (err) {
+        alert(`Could not check Qualtrics configuration: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+    }
+
     const url = api.exportUrl(type, {
       cohort_id: selectedSurvey || undefined,
       start: startDate || undefined,
@@ -496,7 +521,10 @@ export default function DashboardPage() {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         credentials: "include",
       });
-      if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        throw new Error(`Export failed: ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+      }
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -509,6 +537,9 @@ export default function DashboardPage() {
       URL.revokeObjectURL(blobUrl);
     } catch (err) {
       console.error("Export failed:", err);
+      if (type === "qualtrics.csv") {
+        alert(`Qualtrics CSV export failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   };
 
@@ -1465,6 +1496,15 @@ export default function DashboardPage() {
                       </Button>
                       <Button variant="outline" size="sm" onClick={() => handleExport("user-testing.csv")} className="gap-2 border-brand-teal/20 text-brand-teal">
                         <FileSpreadsheet className="h-4 w-4" /> User Testing CSV
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleExport("qualtrics.csv")}
+                        className="gap-2 border-brand-yellow/30 text-brand-dark-yellow"
+                        title="Qualtrics-importable CSV — open-ended follow-ups merged into the main answer; per-question voice/text indicator"
+                      >
+                        <FileSpreadsheet className="h-4 w-4" /> Qualtrics CSV
                       </Button>
                     </div>
                   </CardContent>

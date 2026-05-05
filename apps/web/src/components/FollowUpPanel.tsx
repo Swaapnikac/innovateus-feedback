@@ -12,8 +12,16 @@ import { MAX_ANSWER_CHARS } from "@/lib/limits";
 interface FollowUpPanelProps {
   followups: string[];
   // Called immediately when each individual follow-up answer is saved/skipped.
-  // The parent should persist to the backend and update its state.
-  onAnswerSaved: (answers: { followup_1_answer?: string; followup_2_answer?: string }) => void;
+  // The parent should persist to the backend and update its state. The
+  // ``followup_*_input_mode`` fields reflect the mode (voice/text) the user
+  // last interacted with for that follow-up; they're recorded so per-question
+  // ``voice / text / mixed / blank`` indicators can be computed downstream.
+  onAnswerSaved: (answers: {
+    followup_1_answer?: string;
+    followup_2_answer?: string;
+    followup_1_input_mode?: string;
+    followup_2_input_mode?: string;
+  }) => void;
   // Called when the follow-up 1 answer is submitted so the parent can check
   // vagueness and optionally append a second follow-up question.
   onCheckFollowupVagueness?: (
@@ -34,7 +42,12 @@ interface FollowUpPanelProps {
 
 export interface FollowUpPanelHandle {
   // Returns the current answers in the panel (including any unsaved typed text)
-  getCurrentAnswers: () => { followup_1_answer?: string; followup_2_answer?: string };
+  getCurrentAnswers: () => {
+    followup_1_answer?: string;
+    followup_2_answer?: string;
+    followup_1_input_mode?: string;
+    followup_2_input_mode?: string;
+  };
 }
 
 export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>(function FollowUpPanel({
@@ -102,6 +115,11 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
   const [committedIndices, setCommittedIndices] = useState<Set<number>>(
     () => new Set(Object.keys(initialMap).map(Number)),
   );
+  // Per-follow-up input mode the participant actually used. Recorded when
+  // each follow-up is committed so the backend can stamp
+  // ``followup_N_input_mode`` and downstream exports / sync can compute
+  // ``voice / text / mixed / blank`` per question.
+  const [committedModes, setCommittedModes] = useState<Record<number, "text" | "voice">>({});
 
   // Which index is active. Start at first unanswered, or null if all answered.
   const firstUnanswered = initialFollowups.findIndex((_, i) => !initialMap[i]);
@@ -137,17 +155,36 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
     getCurrentAnswers: () => ({
       followup_1_answer: 0 in answers ? answers[0] : undefined,
       followup_2_answer: 1 in answers ? answers[1] : undefined,
+      followup_1_input_mode: committedModes[0],
+      followup_2_input_mode: committedModes[1],
     }),
   }));
 
-  const buildAnswerPayload = (updatedAnswers: Record<number, string>) => ({
-    followup_1_answer: 0 in updatedAnswers ? updatedAnswers[0] : undefined,
-    followup_2_answer: 1 in updatedAnswers ? updatedAnswers[1] : undefined,
-  });
+  const buildAnswerPayload = (
+    updatedAnswers: Record<number, string>,
+    modesOverride?: Record<number, "text" | "voice">,
+  ) => {
+    const modes = modesOverride ?? committedModes;
+    return {
+      followup_1_answer: 0 in updatedAnswers ? updatedAnswers[0] : undefined,
+      followup_2_answer: 1 in updatedAnswers ? updatedAnswers[1] : undefined,
+      followup_1_input_mode: modes[0],
+      followup_2_input_mode: modes[1],
+    };
+  };
 
   const saveAndAdvance = async (savedAnswers: Record<number, string>, idx: number) => {
+    // Capture the mode the participant just used for this follow-up so
+    // downstream consumers can compute ``voice / text / mixed / blank``
+    // per question. Only recorded when the slot has actual content —
+    // skips (empty answers) shouldn't claim a mode.
+    const nextModes = { ...committedModes };
+    if (savedAnswers[idx]?.trim()) {
+      nextModes[idx] = inputMode;
+      setCommittedModes(nextModes);
+    }
     // Save immediately to the backend via parent callback
-    onAnswerSaved(buildAnswerPayload(savedAnswers));
+    onAnswerSaved(buildAnswerPayload(savedAnswers, nextModes));
     // Mark this slot as committed so a subsequent re-open via Edit falls
     // into the Save path instead of re-running the vagueness check.
     setCommittedIndices((prev) => {
@@ -219,7 +256,11 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
 
   // When editing an already-answered follow-up, save on confirm
   const handleEditSave = async (idx: number) => {
-    onAnswerSaved(buildAnswerPayload(answers));
+    const nextModes = answers[idx]?.trim()
+      ? { ...committedModes, [idx]: inputMode }
+      : committedModes;
+    if (nextModes !== committedModes) setCommittedModes(nextModes);
+    onAnswerSaved(buildAnswerPayload(answers, nextModes));
     setActiveIndex(null);
   };
 
@@ -231,14 +272,23 @@ export const FollowUpPanel = forwardRef<FollowUpPanelHandle, FollowUpPanelProps>
     const handleEditModeChange = (idx: number, value: string) => {
       const updated = { ...answers, [idx]: value.slice(0, MAX_ANSWER_CHARS) };
       setAnswers(updated);
+      // Edit-mode typing implies text input for that follow-up
+      const nextModes = updated[idx]?.trim()
+        ? { ...committedModes, [idx]: "text" as const }
+        : committedModes;
+      if (nextModes !== committedModes) setCommittedModes(nextModes);
       // Auto-save to parent on every change so "Back to Review" picks up edits
-      onAnswerSaved(buildAnswerPayload(updated));
+      onAnswerSaved(buildAnswerPayload(updated, nextModes));
     };
 
     const handleEditModeTranscript = (idx: number, transcript: string) => {
       const updated = { ...answers, [idx]: transcript };
       setAnswers(updated);
-      onAnswerSaved(buildAnswerPayload(updated));
+      const nextModes = transcript?.trim()
+        ? { ...committedModes, [idx]: "voice" as const }
+        : committedModes;
+      if (nextModes !== committedModes) setCommittedModes(nextModes);
+      onAnswerSaved(buildAnswerPayload(updated, nextModes));
       // Switch to text mode so user can see and edit the transcript
       setEditModes((prev) => ({ ...prev, [idx]: "text" }));
     };

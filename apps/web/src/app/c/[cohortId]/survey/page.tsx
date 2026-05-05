@@ -673,6 +673,8 @@ export default function SurveyPage() {
   const handleFollowupAnswerSaved = useCallback(async (followupAnswers: {
     followup_1_answer?: string;
     followup_2_answer?: string;
+    followup_1_input_mode?: string;
+    followup_2_input_mode?: string;
   }) => {
     if (!currentQuestion || !submissionId) return;
     // Use answersRef (always current) so we never read a stale closure value
@@ -715,8 +717,10 @@ export default function SurveyPage() {
         followups_asked: ans.followups?.length || 0,
         followup_1: ans.followups?.[0],
         followup_1_answer: followupAnswers.followup_1_answer,
+        followup_1_input_mode: followupAnswers.followup_1_input_mode,
         followup_2: ans.followups?.[1],
         followup_2_answer: followupAnswers.followup_2_answer,
+        followup_2_input_mode: followupAnswers.followup_2_input_mode,
       });
       setSaveError(false);
     } catch {

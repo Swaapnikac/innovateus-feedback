@@ -17,7 +17,11 @@
       "options": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
       "required": false,
       "voice_eligible": false,
-      "group": "intro"
+      "group": "intro",
+      "qualtrics": {
+        "production": { "qid": "QID5", "data_export_tag": "Q5" },
+        "test":       { "qid": "QID1", "data_export_tag": "Q1" }
+      }
     },
     {
       "id": "q2_confidence",
@@ -32,7 +36,31 @@
       ],
       "required": false,
       "voice_eligible": false,
-      "group": "closed_1"
+      "group": "closed_1",
+      "qualtrics": {
+        "production": {
+          "qid": "QID23",
+          "data_export_tag": "Q23",
+          "recodes": {
+            "Very confident": 1,
+            "Somewhat confident": 4,
+            "A little confident": 5,
+            "Not confident": 6,
+            "I am not using generative AI yet": 7
+          }
+        },
+        "test": {
+          "qid": "QID2",
+          "data_export_tag": "Q2",
+          "recodes": {
+            "Very confident": 1,
+            "Somewhat confident": 2,
+            "A little confident": 3,
+            "Not confident": 4,
+            "I am not using generative AI yet": 5
+          }
+        }
+      }
     },
     {
       "id": "q3_clarity",
@@ -41,7 +69,19 @@
       "options": ["Yes", "Somewhat", "No", "Still unsure"],
       "required": false,
       "voice_eligible": false,
-      "group": "closed_1"
+      "group": "closed_1",
+      "qualtrics": {
+        "production": {
+          "qid": "QID24",
+          "data_export_tag": "Q24",
+          "recodes": { "Yes": 1, "Somewhat": 4, "No": 5, "Still unsure": 6 }
+        },
+        "test": {
+          "qid": "QID3",
+          "data_export_tag": "Q3",
+          "recodes": { "Yes": 1, "Somewhat": 2, "No": 3, "Still unsure": 4 }
+        }
+      }
     },
     {
       "id": "q4_likely_uses",
@@ -61,7 +101,39 @@
       ],
       "required": false,
       "voice_eligible": false,
-      "group": "closed_2"
+      "group": "closed_2",
+      "qualtrics": {
+        "production": {
+          "qid": "QID25",
+          "data_export_tag": "Q25",
+          "recodes": {
+            "Create content (for example, text, images, audio, video)": 1,
+            "Edit content (for example, text, images, audio, video)": 4,
+            "Summarize or synthesize text": 5,
+            "Sort or organize multiple texts": 6,
+            "Analyze, sort, label, or organize data": 7,
+            "Conduct research": 8,
+            "Translate into other languages or simplify into plain language": 9,
+            "Simulate conversations": 10,
+            "Write or analyze computer code": 11
+          }
+        },
+        "test": {
+          "qid": "QID4",
+          "data_export_tag": "Q4",
+          "recodes": {
+            "Create content (for example, text, images, audio, video)": 1,
+            "Edit content (for example, text, images, audio, video)": 2,
+            "Summarize or synthesize text": 3,
+            "Sort or organize multiple texts": 4,
+            "Analyze, sort, label, or organize data": 5,
+            "Conduct research": 6,
+            "Translate into other languages or simplify into plain language": 7,
+            "Simulate conversations": 8,
+            "Write or analyze computer code": 9
+          }
+        }
+      }
     },
     {
       "id": "q5_impact",
@@ -70,7 +142,19 @@
       "options": ["Easier", "Harder", "Neither", "Do not know"],
       "required": false,
       "voice_eligible": false,
-      "group": "closed_2"
+      "group": "closed_2",
+      "qualtrics": {
+        "production": {
+          "qid": "QID18",
+          "data_export_tag": "Q7",
+          "recodes": { "Easier": 1, "Harder": 4, "Neither": 5, "Do not know": 6 }
+        },
+        "test": {
+          "qid": "QID5",
+          "data_export_tag": "Q5",
+          "recodes": { "Easier": 1, "Harder": 2, "Neither": 3, "Do not know": 4 }
+        }
+      }
     },
     {
       "id": "q8_exercises",
@@ -86,7 +170,33 @@
       ],
       "required": false,
       "voice_eligible": false,
-      "group": "closed_2"
+      "group": "closed_2",
+      "qualtrics": {
+        "production": {
+          "qid": "QID22",
+          "data_export_tag": "Q4",
+          "recodes": {
+            "No, I did not have enough time to attempt the exercises": 1,
+            "No, I decided not to do the exercises": 4,
+            "No, I was not able to access the appropriate websites or tools": 5,
+            "Yes, I attempted but did not complete any exercises": 6,
+            "Yes, I completed some of the exercises": 7,
+            "Yes, I completed all of the exercises": 8
+          }
+        },
+        "test": {
+          "qid": "QID6",
+          "data_export_tag": "Q6",
+          "recodes": {
+            "No, I did not have enough time to attempt the exercises": 1,
+            "No, I decided not to do the exercises": 2,
+            "No, I was not able to access the appropriate websites or tools": 3,
+            "Yes, I attempted but did not complete any exercises": 4,
+            "Yes, I completed some of the exercises": 5,
+            "Yes, I completed all of the exercises": 6
+          }
+        }
+      }
     },
     {
       "id": "q6_most_impactful",
@@ -99,6 +209,10 @@
         "question_id": "q2_confidence",
         "operator": "not_equals",
         "value": "I am not using generative AI yet"
+      },
+      "qualtrics": {
+        "production": { "qid": "QID3", "data_export_tag": "Q8" },
+        "test":       { "qid": "QID7", "data_export_tag": "Q7" }
       }
     },
     {
@@ -107,7 +221,11 @@
       "text": "As a result of this course, what is one specific task or workflow you now feel better prepared to do with the help of GenAI?",
       "required": false,
       "voice_eligible": true,
-      "group": "open"
+      "group": "open",
+      "qualtrics": {
+        "production": { "qid": "QID26", "data_export_tag": "Q26" },
+        "test":       { "qid": "QID8",  "data_export_tag": "Q8"  }
+      }
     },
     {
       "id": "q9_feedback",
@@ -115,7 +233,11 @@
       "text": "Please tell us anything you would like us to know about this course. We especially welcome feedback that will help us improve it for future learners.",
       "required": false,
       "voice_eligible": true,
-      "group": "closing"
+      "group": "closing",
+      "qualtrics": {
+        "production": { "qid": "QID6", "data_export_tag": "Q9" },
+        "test":       { "qid": "QID9", "data_export_tag": "Q9" }
+      }
     }
   ]
 }

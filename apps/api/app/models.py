@@ -59,6 +59,10 @@ class Cohort(Base):
     facilitator_issue_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     facilitator_issue_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Qualtrics sync target — NULL falls back to settings.qualtrics_default_target.
+    # Allowed: "production" | "test" | "none".
+    qualtrics_target: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+
     submissions: Mapped[list["Submission"]] = relationship(back_populates="cohort")
     versions: Mapped[list["SurveyConfigVersion"]] = relationship(back_populates="cohort", order_by="SurveyConfigVersion.created_at.desc()")
 

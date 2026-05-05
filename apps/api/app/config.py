@@ -12,6 +12,12 @@ class Settings(BaseSettings):
     editor_password_hash: str = ""
     # Qualtrics
     qualtrics_api_token: str = ""
+    qualtrics_production_survey_id: str = ""
+    qualtrics_production_datacenter_id: str = ""
+    qualtrics_test_survey_id: str = ""
+    qualtrics_test_datacenter_id: str = ""
+    qualtrics_default_target: str = "production"  # "production" | "test" | "none"
+    # Deprecated single-survey vars — fall through to test slot when set
     qualtrics_survey_id: str = ""
     qualtrics_datacenter_id: str = ""
     # JotForm

@@ -116,15 +116,23 @@ export default function PipelinesPage() {
     api
       .getQualtricsStatus()
       .then((data) => {
+        // Default target picks which slot's IDs we surface in the
+        // "Connection Details" panel; the badge stays tied to whether
+        // the chosen target is configured (a token + survey + datacenter).
+        const slot =
+          data.default_target === "test" ? data.test : data.production;
         setPipelines((prev) =>
           prev.map((p) =>
             p.id === "qualtrics"
               ? {
                   ...p,
-                  configured: data.configured,
+                  configured: slot.configured,
                   details: {
-                    survey_id: data.survey_id,
-                    datacenter_id: data.datacenter_id,
+                    default_target: data.default_target,
+                    survey_id: slot.survey_id,
+                    datacenter_id: slot.datacenter_id,
+                    production_configured: data.production.configured ? "yes" : "no",
+                    test_configured: data.test.configured ? "yes" : "no",
                   },
                   loading: false,
                 }
@@ -308,27 +316,38 @@ export default function PipelinesPage() {
                               Get your API token from Qualtrics Account Settings
                             </li>
                             <li>
-                              Create a matching survey in Qualtrics with Embedded Data fields
-                            </li>
-                            <li>
                               Add{" "}
                               <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
                                 QUALTRICS_API_TOKEN
-                              </code>
-                              ,{" "}
-                              <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
-                                QUALTRICS_SURVEY_ID
-                              </code>
-                              , and{" "}
-                              <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
-                                QUALTRICS_DATACENTER_ID
                               </code>{" "}
                               to your{" "}
                               <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
                                 .env
                               </code>
                             </li>
-                            <li>Run migration and restart the API server</li>
+                            <li>
+                              Set{" "}
+                              <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
+                                QUALTRICS_PRODUCTION_SURVEY_ID
+                              </code>{" "}
+                              +{" "}
+                              <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
+                                QUALTRICS_PRODUCTION_DATACENTER_ID
+                              </code>{" "}
+                              for the live survey, and the matching{" "}
+                              <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
+                                _TEST_
+                              </code>{" "}
+                              vars for the test survey
+                            </li>
+                            <li>
+                              Pick a default target via{" "}
+                              <code className="text-xs bg-brand-blue/5 px-1.5 py-0.5 rounded">
+                                QUALTRICS_DEFAULT_TARGET
+                              </code>{" "}
+                              (production | test) — individual cohorts can override
+                            </li>
+                            <li>Run migrations and restart the API server</li>
                           </ol>
                         ) : (
                           <ol className="text-sm text-brand-blue/60 space-y-1 list-decimal list-inside">
