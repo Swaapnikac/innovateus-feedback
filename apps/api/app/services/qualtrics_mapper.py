@@ -570,15 +570,6 @@ def build_qualtrics_csv_headers(
             row2.append(f"{q_text} — input mode {type_marker}")
             row3.append(json.dumps({"ImportId": mode_col}))
 
-        # For multi-select, also include a pipe-joined human-readable
-        # column so analysts can read the CSV without expanding the per-
-        # choice flag columns.
-        if q_type == "multi":
-            text_col = f"{tag}_text"
-            row1.append(text_col)
-            row2.append(f"{q_text} — selected (text) {type_marker}")
-            row3.append(json.dumps({"ImportId": text_col}))
-
     for col, label, import_id in _TRAILING_COLUMNS:
         row1.append(col)
         row2.append(label)
@@ -600,20 +591,15 @@ def _multi_text(answer: Optional[Answer]) -> str:
 
 
 def _format_multi_value_for_csv(answer: Optional[Answer], question: dict, target: str) -> str:
-    """For multi-select, the main column gets the recoded choice IDs joined.
+    """Pipe-joined choice text for multi-select main column.
 
-    This matches the Qualtrics CSV convention where multi-answer columns
-    show a comma-separated list of choice codes (e.g., ``1,4,5``).
+    The CSV is the analyst-facing artifact, so it carries human-readable
+    labels like ``"Create content | Summarize text"`` instead of the
+    coded form Qualtrics uses internally (``1,5``). The API sync payload
+    still uses the per-choice flag form because Qualtrics' Response
+    Import API requires it — the two paths intentionally differ.
     """
-    if answer is None:
-        return ""
-    formatted = format_answer_value(answer, question, target, strict=False)
-    if not formatted:
-        return ""
-    qid = question_qid(question, target) or ""
-    suffix = f"{qid}_"
-    selected = sorted(int(k[len(suffix):]) for k in formatted.keys() if k.startswith(suffix))
-    return ",".join(str(s) for s in selected)
+    return _multi_text(answer)
 
 
 def build_qualtrics_csv_row(
@@ -657,19 +643,16 @@ def build_qualtrics_csv_row(
         elif q_type == "multi":
             row.append(_format_multi_value_for_csv(a, q, target.name))
         else:
-            formatted = format_answer_value(a, q, target.name, strict=False)
-            if not formatted:
-                row.append("")
-            else:
-                # Single-key dict for rating / mcq
-                row.append(str(next(iter(formatted.values()))))
+            # Closed single-choice (mcq / rating / yesno / …) — emit the
+            # raw choice text the participant selected. For rating that's
+            # already the integer; for mcq it's the choice label
+            # ("Very confident", "Yes", etc.) — far more useful for an
+            # analyst than the numeric recode (1 / 4 / 5).
+            row.append((a.answer_raw if (a and a.answer_raw) else ""))
 
         # Input-mode column is open-only — must mirror header gating.
         if is_open_question(q):
             row.append(compute_question_input_mode(a, q))
-
-        if q_type == "multi":
-            row.append(_multi_text(a))
 
     for _, _, import_id in _TRAILING_COLUMNS:
         row.append(str(meta.get(import_id, "")))

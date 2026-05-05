@@ -517,7 +517,7 @@ class TestCsvShape:
         # submission_id is omitted — ResponseId already carries the same value
         assert "submission_id" not in cells
 
-    def test_csv_row_multi_outputs_choice_codes(self):
+    def test_csv_row_multi_outputs_choice_text(self):
         sub = Submission(
             id=uuid.uuid4(),
             cohort_id=uuid.uuid4(),
@@ -540,5 +540,33 @@ class TestCsvShape:
             target=_resolved_prod(),
         )
         cells = dict(zip(headers, row))
-        assert cells["Q25"] == "1,5"
-        assert cells["Q25_text"] == "Create content | Summarize text"
+        # Main column carries human-readable choice text, not codes.
+        assert cells["Q25"] == "Create content | Summarize text"
+        # The redundant ``_text`` companion column is gone.
+        assert "Q25_text" not in cells
+
+    def test_csv_row_mcq_outputs_choice_text(self):
+        """Closed single-choice columns show the choice label, not the recode int."""
+        sub = Submission(
+            id=uuid.uuid4(),
+            cohort_id=uuid.uuid4(),
+            status="completed",
+            created_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+        )
+        answer = Answer(
+            submission_id=sub.id,
+            question_id="q2_confidence",
+            question_type="mcq",
+            answer_raw="Very confident",
+        )
+        headers = build_qualtrics_csv_headers([Q_MCQ], _resolved_prod())[0]
+        row = build_qualtrics_csv_row(
+            submission=sub,
+            answers=[answer],
+            cohort=None,
+            questions=[Q_MCQ],
+            target=_resolved_prod(),
+        )
+        cells = dict(zip(headers, row))
+        assert cells["Q23"] == "Very confident"  # NOT "1"
