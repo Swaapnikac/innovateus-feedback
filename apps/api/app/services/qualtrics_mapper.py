@@ -322,8 +322,12 @@ def format_answer_value(
 ) -> dict[str, Any]:
     """Build the ``{QID: value}`` dict for a single question.
 
-    Multi-select returns multiple keys (``QID25_1``, ``QID25_4``, …).
-    Open-ended returns the **combined** main + follow-up text under the QID.
+    Multi-select returns ``{QID: ["1", "4"]}`` — Qualtrics' MAVR question
+    type stores multi-answer responses as an array of choice-ID strings
+    under the bare QID, NOT as per-choice ``QID_<n>`` flags.
+    Open-ended returns the combined main + follow-up text under
+    ``{QID}_TEXT`` — text-entry questions land in the ``_TEXT`` sub-field,
+    not the bare QID.
     Closed questions return the recoded integer.
 
     With ``strict=False`` missing recodes / QIDs degrade gracefully (used by
@@ -354,7 +358,7 @@ def format_answer_value(
         text = combine_open_answer(answer)
         if not text:
             return {}
-        return {qid: text}
+        return {f"{qid}_TEXT": text}
 
     if q_type == "multi":
         raw = answer.answer_raw or ""
@@ -365,7 +369,7 @@ def format_answer_value(
         if not isinstance(items, list):
             return {}
         recodes = question_recodes(question, target)
-        out: dict[str, Any] = {}
+        choice_ids: list[str] = []
         for opt in items:
             opt_str = str(opt)
             choice_id = recodes.get(opt_str)
@@ -375,8 +379,10 @@ def format_answer_value(
                         f"No recode for choice {opt_str!r} on question {q_id!r} under target {target!r}"
                     )
                 continue
-            out[f"{qid}_{choice_id}"] = 1
-        return out
+            choice_ids.append(str(choice_id))
+        if not choice_ids:
+            return {}
+        return {qid: choice_ids}
 
     # mcq / yesno / generic single-answer
     raw = (answer.answer_raw or "").strip()

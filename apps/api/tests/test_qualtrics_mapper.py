@@ -243,10 +243,13 @@ class TestFormatAnswerValue:
         a = Answer(answer_raw="Wibble")
         assert format_answer_value(a, Q_MCQ, "production", strict=False) == {"QID23": "Wibble"}
 
-    def test_multi_emits_per_choice_flags(self):
+    def test_multi_emits_choice_id_array(self):
+        # Qualtrics' MAVR multi-answer type stores responses as an array of
+        # choice ID strings under the bare QID — NOT as per-choice _N flags.
+        # The earlier per-choice format was silently dropped on import.
         a = Answer(answer_raw=json.dumps(["Create content", "Summarize text"]))
         out = format_answer_value(a, Q_MULTI, "production")
-        assert out == {"QID25_1": 1, "QID25_5": 1}
+        assert out == {"QID25": ["1", "5"]}
 
     def test_multi_empty_returns_empty(self):
         a = Answer(answer_raw="")
@@ -257,13 +260,15 @@ class TestFormatAnswerValue:
         with pytest.raises(MissingQualtricsMappingError):
             format_answer_value(a, Q_MULTI, "production", strict=True)
 
-    def test_open_returns_combined_text(self):
+    def test_open_returns_combined_text_under_text_subfield(self):
+        # Text-entry questions land in the ``QID_TEXT`` sub-field on Qualtrics,
+        # not the bare QID. Bare-QID payloads were silently dropped on import.
         a = Answer(
             answer_raw="Drafting emails",
             followup_1_answer="Mainly outreach",
         )
         assert format_answer_value(a, Q_OPEN, "production") == {
-            "QID3": "Drafting emails. Mainly outreach."
+            "QID3_TEXT": "Drafting emails. Mainly outreach."
         }
 
     def test_open_empty_returns_empty(self):
@@ -400,7 +405,7 @@ class TestBuildPayload:
         values = payload["values"]
         # Question values
         assert values["QID5"] == 9
-        assert values["QID3"] == "Drafting emails. Mainly outreach."
+        assert values["QID3_TEXT"] == "Drafting emails. Mainly outreach."
         # Per-question input mode indicator — only for open-ended questions
         assert "q1_recommend_input_mode" not in values  # closed → no field
         assert values["q6_most_impactful_input_mode"] == "mixed"
@@ -432,8 +437,8 @@ class TestBuildPayload:
             target=_resolved_prod(),
         )
         keys = list(payload["values"].keys())
-        # The combined text lives under QID3
-        assert payload["values"]["QID3"] == "A. B. C."
+        # The combined text lives under the QID's _TEXT sub-field
+        assert payload["values"]["QID3_TEXT"] == "A. B. C."
         # And nothing leaks the follow-up *questions* or per-followup answers
         for k in keys:
             assert "_followup_1_q" not in k
