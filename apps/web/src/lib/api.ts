@@ -1,4 +1,14 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Base URL for backend calls.
+//
+// - When ``NEXT_PUBLIC_API_URL`` is set (local dev: ``http://localhost:8009``),
+//   we hit the backend directly. The browser pays one CORS preflight per
+//   route but the dev experience is straightforward.
+// - When it's empty (production behind the Next.js rewrite proxy), we use
+//   the same-origin path ``/api`` so requests stay on
+//   ``publicvoice.innovate-us.org`` and the API's Set-Cookie gets bound
+//   to the frontend's domain. ``next.config.ts`` rewrites
+//   ``/api/v1/:path*`` to ``${API_PROXY_TARGET}/v1/:path*`` server-side.
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 // Paths we don't want to emit api_latency for (avoids feedback loops and
 // dashboard-admin noise — dashboard metrics paths include /admin/).

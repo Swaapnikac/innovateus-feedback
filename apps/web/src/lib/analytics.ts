@@ -19,7 +19,11 @@
  * survive navigation and unload. Failures are intentionally swallowed.
  */
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Mirrors the resolution in ``lib/api.ts``. Empty NEXT_PUBLIC_API_URL means
+// we're behind the Next.js rewrite proxy in production — fall back to
+// same-origin ``/api`` so cookies and the X-Submission-Token round-trip
+// land on the right host.
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 const FLUSH_INTERVAL_MS = 2000;
 const FLUSH_BATCH_SIZE = 5;
 

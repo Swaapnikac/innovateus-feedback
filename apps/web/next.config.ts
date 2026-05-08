@@ -46,6 +46,30 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // Reverse-proxy the FastAPI backend through this Next.js server so the
+  // browser only ever talks to one origin. With API and frontend on
+  // different parent domains, the API's Set-Cookie was bound to the API
+  // host and never made it back to the frontend — which broke the
+  // /iu-ops-9k2p middleware and forced cross-site cookie rules that
+  // strict browsers (Safari, Brave) refuse outright. Routing /api/v1/*
+  // through here makes every cookie first-party.
+  //
+  // ``API_PROXY_TARGET`` is intentionally NOT prefixed with NEXT_PUBLIC_
+  // so it is only available in the Node runtime (rewrites resolve here)
+  // and never bundled into the client JS. The browser never sees the
+  // upstream URL.
+  async rewrites() {
+    const target = process.env.API_PROXY_TARGET;
+    if (!target) {
+      // No proxy configured (typical in local dev where the survey hits
+      // the API directly via NEXT_PUBLIC_API_URL=http://localhost:8009).
+      return [];
+    }
+    const cleaned = target.replace(/\/+$/, "");
+    return [
+      { source: "/api/v1/:path*", destination: `${cleaned}/v1/:path*` },
+    ];
+  },
 };
 
 export default withNextIntl(nextConfig);
