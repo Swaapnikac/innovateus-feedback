@@ -1,10 +1,23 @@
 import json
+import re
 import uuid
 from pathlib import Path
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+
+
+# DB column is String(20); we mint labels as ``v<int>`` in
+# ``_next_version_label``. Anything outside this shape is either a typo
+# or a probe — reject before we touch the DB.
+_VERSION_LABEL_RE = re.compile(r"^v\d{1,18}$")
+
+
+def _validate_version_label(label: str) -> str:
+    if not _VERSION_LABEL_RE.match(label):
+        raise HTTPException(status_code=422, detail="Invalid version_label format")
+    return label
 from app.db import get_db
 from app.models import Cohort, SurveyConfigVersion
 from app.schemas import (
@@ -107,7 +120,19 @@ def editor_login(req: EditorLoginRequest, response: Response):
         samesite="none" if settings.environment != "development" else "lax",
         max_age=86400,
     )
-    return AdminLoginResponse(token=token)
+    return AdminLoginResponse()
+
+
+@router.post("/editor/logout")
+def editor_logout(response: Response):
+    settings = get_settings()
+    response.delete_cookie(
+        key="editor_token",
+        httponly=True,
+        secure=settings.environment != "development",
+        samesite="none" if settings.environment != "development" else "lax",
+    )
+    return {"status": "ok"}
 
 
 @router.get("/editor/cohorts", dependencies=[Depends(require_editor)])
@@ -248,6 +273,7 @@ async def list_versions(
     dependencies=[Depends(require_editor)],
 )
 async def get_version(cohort_id: uuid.UUID, version_label: str, db: AsyncSession = Depends(get_db)):
+    _validate_version_label(version_label)
     result = await db.execute(
         select(SurveyConfigVersion).where(
             SurveyConfigVersion.cohort_id == cohort_id,
@@ -272,6 +298,7 @@ async def get_version(cohort_id: uuid.UUID, version_label: str, db: AsyncSession
     dependencies=[Depends(require_editor)],
 )
 async def restore_version(cohort_id: uuid.UUID, version_label: str, db: AsyncSession = Depends(get_db)):
+    _validate_version_label(version_label)
     cohort_result = await db.execute(select(Cohort).where(Cohort.id == cohort_id))
     cohort = cohort_result.scalar_one_or_none()
     if not cohort:

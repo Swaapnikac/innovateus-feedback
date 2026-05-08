@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from app.schemas import (
     VaguenessRequest, VaguenessResponse,
     FollowUpRequest, FollowUpResponse,
@@ -15,18 +15,21 @@ from app.services.ai_service import (
     detect_followup_needs_clarification,
     detect_and_redact_pii_with_ai,
 )
+from app.rate_limit import limiter, AI_HEAVY_LIMIT, AI_NORMAL_LIMIT
 
 router = APIRouter()
 
 
 @router.post("/ai/vagueness", response_model=VaguenessResponse)
-async def check_vagueness(req: VaguenessRequest):
+@limiter.limit(AI_NORMAL_LIMIT)
+async def check_vagueness(request: Request, req: VaguenessRequest):
     result = await detect_vagueness(req.question_text, req.answer_text)
     return VaguenessResponse(**result)
 
 
 @router.post("/ai/followups", response_model=FollowUpResponse)
-async def get_followups(req: FollowUpRequest):
+@limiter.limit(AI_HEAVY_LIMIT)
+async def get_followups(request: Request, req: FollowUpRequest):
     followups = await generate_followups(
         req.question_text, req.answer_text, req.missing_info_types
     )
@@ -34,7 +37,8 @@ async def get_followups(req: FollowUpRequest):
 
 
 @router.post("/ai/check", response_model=VaguenessWithFollowupsResponse)
-async def check_vagueness_with_followups(req: VaguenessRequest):
+@limiter.limit(AI_NORMAL_LIMIT)
+async def check_vagueness_with_followups(request: Request, req: VaguenessRequest):
     """Single LLM call: vagueness classification + follow-up generation together.
     ~1.5s vs ~3s for two sequential calls."""
     result = await detect_vagueness_with_followups(req.question_text, req.answer_text)
@@ -42,7 +46,8 @@ async def check_vagueness_with_followups(req: VaguenessRequest):
 
 
 @router.post("/ai/check-followup", response_model=VaguenessWithFollowupsResponse)
-async def check_followup_vagueness(req: FollowUpCheckRequest):
+@limiter.limit(AI_NORMAL_LIMIT)
+async def check_followup_vagueness(request: Request, req: FollowUpCheckRequest):
     """Decide whether a follow-up answer needs one more clarifying question.
 
     Differs from ``/ai/check`` in that it receives the original question +
@@ -59,13 +64,15 @@ async def check_followup_vagueness(req: FollowUpCheckRequest):
 
 
 @router.post("/ai/cleanup", response_model=CleanupResponse)
-async def cleanup(req: CleanupRequest):
+@limiter.limit(AI_HEAVY_LIMIT)
+async def cleanup(request: Request, req: CleanupRequest):
     result = await cleanup_transcript(req.raw_text)
     return CleanupResponse(**result)
 
 
 @router.post("/ai/pii-check", response_model=PiiCheckResponse)
-async def check_pii(req: PiiCheckRequest):
+@limiter.limit(AI_NORMAL_LIMIT)
+async def check_pii(request: Request, req: PiiCheckRequest):
     """Regex + GPT-5-mini PII scan used by the survey Next click.
 
     Returns metadata only (found / count / categories) — never the redacted

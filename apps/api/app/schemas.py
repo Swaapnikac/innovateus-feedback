@@ -1,25 +1,62 @@
-from pydantic import BaseModel, Field
+import json
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from datetime import datetime
 import uuid
 
 
+# Hard cap on client-supplied metadata blobs and similar dicts. 8KB is more
+# than enough for legitimate payloads (UA hints, screen size, locale, etc.)
+# and stops oversized blobs from reaching the DB or downstream parsers.
+_MAX_METADATA_BYTES = 8 * 1024
+
+# Per-event payload cap. Analytics events (question_started, mode_switched,
+# api_latency, etc.) are tiny structured dicts — anything larger is either
+# a buggy client or someone abusing the unauthenticated /v1/events surface
+# to fill the JSONB column.
+_MAX_EVENT_DATA_BYTES = 4 * 1024
+
+
+def _validate_metadata_size(value):
+    if value is None:
+        return value
+    try:
+        encoded = json.dumps(value)
+    except (TypeError, ValueError):
+        raise ValueError("client_metadata must be JSON-serialisable")
+    if len(encoded.encode("utf-8")) > _MAX_METADATA_BYTES:
+        raise ValueError(f"client_metadata exceeds {_MAX_METADATA_BYTES} byte limit")
+    return value
+
+
+def _validate_event_data_size(value):
+    if value is None:
+        return {}
+    try:
+        encoded = json.dumps(value)
+    except (TypeError, ValueError):
+        raise ValueError("event_data must be JSON-serialisable")
+    if len(encoded.encode("utf-8")) > _MAX_EVENT_DATA_BYTES:
+        raise ValueError(f"event_data exceeds {_MAX_EVENT_DATA_BYTES} byte limit")
+    return value
+
+
 class SurveyQuestion(BaseModel):
-    id: str
-    type: str
-    text: str
-    description: Optional[str] = None
-    options: Optional[list] = None
+    id: str = Field(..., max_length=128)
+    type: str = Field(..., max_length=32)
+    text: str = Field(..., max_length=1000)
+    description: Optional[str] = Field(None, max_length=2000)
+    options: Optional[list] = Field(None, max_length=40)
     required: bool = True
     voice_eligible: bool = False
     condition: Optional[dict] = None
-    group: Optional[str] = None
+    group: Optional[str] = Field(None, max_length=64)
     # Slider-specific
     scale_min: Optional[float] = None
     scale_max: Optional[float] = None
     scale_step: Optional[float] = None
     # Matrix-specific — rows rated against `options` (columns)
-    rows: Optional[list[str]] = None
+    rows: Optional[list[str]] = Field(None, max_length=40)
     # NPS / scale endpoint labels
     labels: Optional[dict] = None
 
@@ -41,18 +78,30 @@ class StartSubmissionRequest(BaseModel):
     # Accepts either the UUID primary key or the cohort slug
     # (``generative-ai``). The submissions router resolves the value before
     # using it, so legacy clients passing UUIDs continue to work unchanged.
-    cohort_id: str
-    consent_version: str = "1.0"
+    cohort_id: str = Field(..., max_length=128)
+    consent_version: str = Field("1.0", max_length=32)
     client_metadata: Optional[dict] = None
+
+    @field_validator("client_metadata")
+    @classmethod
+    def _cap_metadata(cls, v):
+        return _validate_metadata_size(v)
 
 
 class StartSubmissionResponse(BaseModel):
     submission_id: uuid.UUID
+    # HMAC token the client must echo on every subsequent mutation as the
+    # ``X-Submission-Token`` header. Closes the IDOR gap: knowing the
+    # submission UUID alone is not enough to PATCH/answer/complete it.
+    submission_token: str
 
 
 class AnswerRequest(BaseModel):
-    question_id: str
-    question_type: str
+    # Bounds match the Answer DB columns (question_id String(50),
+    # question_type String(50)) so an oversized value yields a clean 422
+    # rather than a downstream DB error.
+    question_id: str = Field(..., max_length=50)
+    question_type: str = Field(..., max_length=50)
     question_text: Optional[str] = Field(None, max_length=1000)
     answer_raw: Optional[str] = Field(None, max_length=5000)
     input_mode: str = "none"
@@ -102,7 +151,7 @@ class VaguenessResponse(BaseModel):
 class FollowUpRequest(BaseModel):
     question_text: str = Field(..., max_length=500)
     answer_text: str = Field(..., max_length=5000)
-    missing_info_types: list[str]
+    missing_info_types: list[str] = Field(default_factory=list, max_length=20)
 
 
 class FollowUpResponse(BaseModel):
@@ -155,6 +204,33 @@ class CompleteSubmissionResponse(BaseModel):
     extraction: Optional[dict] = None
 
 
+class SavedAnswer(BaseModel):
+    """Single previously-saved answer, in a shape the survey UI can map
+    straight onto its in-memory ``AnswerState`` when resuming a submission.
+
+    ``multi_values`` is pre-parsed server-side for ``multi``/``ranking``
+    questions whose ``answer_raw`` was stored as a JSON-stringified array,
+    so the client doesn't have to repeat that fragile string parsing.
+    """
+
+    question_id: str
+    question_type: str
+    value: str = ""
+    multi_values: list[str] = []
+    input_mode: str = "voice"
+    transcript: Optional[str] = None
+    is_vague: Optional[bool] = None
+    followups: list[str] = []
+    followup_1_answer: Optional[str] = None
+    followup_2_answer: Optional[str] = None
+
+
+class SubmissionAnswersResponse(BaseModel):
+    submission_id: uuid.UUID
+    status: str
+    answers: list[SavedAnswer]
+
+
 class ExtractionResponse(BaseModel):
     what_was_tried: Optional[str] = None
     planned_task_or_workflow: Optional[str] = None
@@ -173,11 +249,18 @@ class TranscriptResponse(BaseModel):
 
 
 class AdminLoginRequest(BaseModel):
-    password: str
+    # bcrypt has a 72-byte input limit and is intentionally slow. A 256
+    # char cap blocks a trivial DoS where someone submits a 1MB password
+    # and ties up a worker on the hash function.
+    password: str = Field(..., max_length=256)
 
 
 class AdminLoginResponse(BaseModel):
-    token: str
+    # Login state is carried by the httpOnly admin_token / editor_token
+    # cookie. We deliberately do not return the token in the response body
+    # — that copy would be readable by JS and was being mirrored into
+    # localStorage, which is an XSS-stealable surface.
+    status: str = "ok"
 
 
 class MetricsResponse(BaseModel):
@@ -222,9 +305,10 @@ class CohortResponse(BaseModel):
 
 
 class CreateCohortRequest(BaseModel):
-    name: str
-    course_name: str = ""
-    program_type: str
+    # DB columns cap these at 255 chars; mirroring here gives clean 422s.
+    name: str = Field(..., max_length=255)
+    course_name: str = Field("", max_length=255)
+    program_type: str = Field(..., max_length=64)
     # Optional human-friendly slug for the survey URL (``/c/<slug>``).
     # When omitted the cohort is reachable via its UUID only, which matches
     # legacy behaviour. When provided it must be lowercase alphanumeric +
@@ -251,14 +335,14 @@ class CohortSettingsRequest(BaseModel):
 
 
 class EditorLoginRequest(BaseModel):
-    password: str
+    password: str = Field(..., max_length=256)
 
 
 class SaveSurveyRequest(BaseModel):
-    version: str = "1.0"
-    title: str
-    questions: list[SurveyQuestion]
-    question_groups: list[QuestionGroup] = []
+    version: str = Field("1.0", max_length=32)
+    title: str = Field(..., max_length=300)
+    questions: list[SurveyQuestion] = Field(..., max_length=80)
+    question_groups: list[QuestionGroup] = Field(default_factory=list, max_length=40)
 
 
 class SurveyVersionSummary(BaseModel):
@@ -276,24 +360,32 @@ class SurveyVersionDetail(SurveyVersionSummary):
 # ── Analytics Events ──
 
 class EventPayload(BaseModel):
-    event_type: str
+    # Bounds mirror the ``Event`` DB columns
+    # (event_type String(50), session_token String(128)) so we can rely
+    # on Pydantic to reject oversized values before they hit the DB.
+    event_type: str = Field(..., max_length=50)
     event_data: dict = {}
-    timestamp: Optional[str] = None
+    timestamp: Optional[str] = Field(None, max_length=64)
+
+    @field_validator("event_data")
+    @classmethod
+    def _cap_event_data(cls, v):
+        return _validate_event_data_size(v)
 
 
 class TrackEventsRequest(BaseModel):
-    session_token: str
-    cohort_id: Optional[str] = None
-    submission_id: Optional[str] = None
+    session_token: str = Field(..., max_length=128)
+    cohort_id: Optional[str] = Field(None, max_length=128)
+    submission_id: Optional[str] = Field(None, max_length=64)
     events: list[EventPayload] = Field(..., max_length=10)
 
 
 class DropoutRequest(BaseModel):
-    session_token: str
-    cohort_id: str
-    submission_id: Optional[str] = None
-    last_question_id: str
-    questions_answered: int
+    session_token: str = Field(..., max_length=128)
+    cohort_id: str = Field(..., max_length=128)
+    submission_id: Optional[str] = Field(None, max_length=64)
+    last_question_id: str = Field(..., max_length=50)
+    questions_answered: int = Field(..., ge=0, le=10_000)
 
 
 # ── Experience Rating ──

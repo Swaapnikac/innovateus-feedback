@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -47,6 +48,8 @@ from app.services.qualtrics_mapper import QualtricsConfigError
 from app.services.ai_service import analyze_open_responses, compare_survey_responses
 from app.services.cohort_resolver import is_valid_slug, slugify
 from app.services.metrics_service import compute_user_testing_metrics
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -243,7 +246,21 @@ def admin_login(req: AdminLoginRequest, response: Response):
         samesite="none" if settings.environment != "development" else "lax",
         max_age=86400,
     )
-    return AdminLoginResponse(token=token)
+    return AdminLoginResponse()
+
+
+@router.post("/logout")
+def admin_logout(response: Response):
+    """Clear the admin_token cookie. Frontend logout calls this — it cannot
+    delete httpOnly cookies from JavaScript on its own."""
+    settings = get_settings()
+    response.delete_cookie(
+        key="admin_token",
+        httponly=True,
+        secure=settings.environment != "development",
+        samesite="none" if settings.environment != "development" else "lax",
+    )
+    return {"status": "ok"}
 
 
 @router.get("/cohorts", dependencies=[Depends(require_admin)])
@@ -497,15 +514,20 @@ async def export_qualtrics_csv(
     try:
         resolved = qualtrics_mapper.resolve_target(cohort, override=target)
     except QualtricsConfigError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        # Don't echo internal config details to admin clients; log
+        # server-side and return a generic 400 instead.
+        logger.warning("qualtrics.csv.target_resolve_failed cohort_id=%s reason=%s", cohort_id, exc)
+        raise HTTPException(
+            status_code=400,
+            detail="Qualtrics target is not configured for this cohort.",
+        )
 
     bundles = await _get_bundles_for_filters(db, cohort_id, start, end, include_started=False)
     bundles = [b for b in bundles if b.submission.status == "completed"]
     bundles.sort(key=lambda b: b.submission.created_at or datetime.min.replace(tzinfo=timezone.utc))
     _, _, survey_config = await _get_cohort_meta(db, cohort_id)
 
-    import logging as _logging
-    _logging.getLogger(__name__).info(
+    logger.info(
         "qualtrics.csv.generated bundles=%d target=%s cohort_id=%s",
         len(bundles), resolved.name, cohort_id,
     )

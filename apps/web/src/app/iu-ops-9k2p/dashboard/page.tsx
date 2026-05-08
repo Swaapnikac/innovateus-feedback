@@ -516,9 +516,9 @@ export default function DashboardPage() {
       end: endDate || undefined,
     });
     try {
-      const token = localStorage.getItem("admin_token");
+      // Cookie auth is sent via credentials: "include" — no manual
+      // Authorization header needed.
       const res = await fetch(url, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
         credentials: "include",
       });
       if (!res.ok) {
@@ -543,9 +543,15 @@ export default function DashboardPage() {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("admin_token");
-        router.push("/iu-ops-9k2p/login");
+  const handleLogout = async () => {
+    try {
+      // Ask the server to clear the httpOnly admin_token cookie. We can't
+      // remove an httpOnly cookie from JS — the API has to do it.
+      await api.adminLogout();
+    } catch {
+      // proceed with redirect even if logout call fails
+    }
+    router.push("/iu-ops-9k2p/login");
   };
 
   // Prefer a cohort's slug when available so the URL is shareable

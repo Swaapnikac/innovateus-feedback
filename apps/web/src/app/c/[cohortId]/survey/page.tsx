@@ -266,10 +266,70 @@ export default function SurveyPage() {
       }
     }
 
-    api.getSurvey(cohortId).then((data) => {
+    api.getSurvey(cohortId).then(async (data) => {
       setQuestions(data.survey.questions);
       sessionStorage.setItem("question_order", JSON.stringify(data.survey.questions.map((q: SurveyQuestion) => q.id)));
       sessionStorage.setItem("question_data", JSON.stringify(data.survey.questions));
+
+      // Resume after tab close: sessionStorage is empty (so we landed in
+      // this fresh-load branch instead of the existingData branch above)
+      // but the DB may still have answers from an earlier in-progress
+      // attempt. Pull them back and rebuild ``review_answers`` so the form
+      // shows what the learner already wrote, and the review page's
+      // summary stays in sync with the form.
+      try {
+        const saved = await api.getSubmissionAnswers(submissionId);
+        if (saved.answers && saved.answers.length > 0) {
+          const restored: Record<string, AnswerState> = {};
+          for (const a of saved.answers) {
+            const inputMode: "text" | "voice" = a.input_mode === "text" ? "text" : "voice";
+            const followupAnswers = a.followup_1_answer || a.followup_2_answer
+              ? {
+                  followup_1_answer: a.followup_1_answer || undefined,
+                  followup_2_answer: a.followup_2_answer || undefined,
+                }
+              : undefined;
+            restored[a.question_id] = {
+              value: a.value || "",
+              multiValues: a.multi_values || [],
+              inputMode,
+              transcript: a.transcript || undefined,
+              isVague: a.is_vague ?? undefined,
+              followups: a.followups && a.followups.length > 0 ? a.followups : undefined,
+              followupAnswers,
+            };
+          }
+          setAnswers(restored);
+          answersRef.current = restored;
+          try {
+            sessionStorage.setItem("review_answers", JSON.stringify(restored));
+          } catch {}
+
+          // Place the learner on the first unanswered visible question so
+          // they pick up where they left off rather than re-typing Q1.
+          const visible = data.survey.questions.filter((q: SurveyQuestion) => {
+            if (!q.condition) return true;
+            const dep = restored[q.condition.question_id];
+            if (!dep) return false;
+            if (q.condition.operator === "not_equals") return dep.value !== q.condition.value;
+            return dep.value === q.condition.value;
+          });
+          const firstUnanswered = visible.findIndex((q) => {
+            const a = restored[q.id];
+            if (!a) return true;
+            if (q.type === "multi" || q.type === "ranking") {
+              return !a.multiValues || a.multiValues.length === 0;
+            }
+            return !a.value;
+          });
+          setCurrentStep(firstUnanswered >= 0 ? firstUnanswered : Math.max(visible.length - 1, 0));
+        }
+      } catch {
+        // 404/409/network — nothing to resume from, start with a blank form.
+        // The /complete and /preview-extraction paths share the same token
+        // gate so a sealed submission can't reach this branch anyway.
+      }
+
       setLoading(false);
     }).catch(() => {
       // First-load failure → show Retry shell. Without this catch, the

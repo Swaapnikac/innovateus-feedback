@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Request, status, Depends
+from fastapi import APIRouter, HTTPException, Request, status, Depends
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +24,8 @@ from app.db import get_db
 from app.models import Answer, Event, Submission
 from app.schemas import TrackEventsRequest, DropoutRequest, EventPayload
 from app.config import get_settings
+from app.rate_limit import EVENTS_DROPOUT_LIMIT, EVENTS_LIMIT, limiter
+from app.submission_session import verify_submission_token
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,8 @@ router = APIRouter()
 
 
 def _hash_ip(ip: str) -> str:
-    salt = get_settings().jwt_secret
+    settings = get_settings()
+    salt = settings.ip_hash_salt or settings.jwt_secret
     return hashlib.sha256(f"{salt}:{ip}".encode()).hexdigest()
 
 
@@ -219,10 +222,30 @@ async def _denormalize_event(
         return
 
 
+def _require_token_for_submission(request: Request, submission_uuid: Optional[uuid.UUID]) -> None:
+    """Verify the submission token when a submission_id is supplied.
+
+    Cohort-only events (no submission_id) are still accepted without a
+    token — they're used for landing-page metrics before a submission row
+    exists. Once we have a submission_id, the caller must prove they
+    received it from /submissions/start by echoing the HMAC.
+    """
+    if submission_uuid is None:
+        return
+    token = request.headers.get("x-submission-token")
+    if not verify_submission_token(submission_uuid, token):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing submission token",
+        )
+
+
 @router.post("/events", status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit(EVENTS_LIMIT)
 async def track_events(req: TrackEventsRequest, request: Request, db: AsyncSession = Depends(get_db)):
     ip_hash = _hash_ip(_get_client_ip(request))
     submission_uuid = _parse_uuid(req.submission_id)
+    _require_token_for_submission(request, submission_uuid)
 
     for evt in req.events:
         ts = (
@@ -250,7 +273,10 @@ async def track_events(req: TrackEventsRequest, request: Request, db: AsyncSessi
 
 
 @router.post("/events/dropout", status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit(EVENTS_DROPOUT_LIMIT)
 async def track_dropout(req: DropoutRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    submission_uuid = _parse_uuid(req.submission_id)
+    _require_token_for_submission(request, submission_uuid)
     ip_hash = _hash_ip(_get_client_ip(request))
     ts = datetime.now(timezone.utc)
 
@@ -269,7 +295,6 @@ async def track_dropout(req: DropoutRequest, request: Request, db: AsyncSession 
     )
     db.add(event)
 
-    submission_uuid = _parse_uuid(req.submission_id)
     sub = await _get_submission(db, submission_uuid)
     if sub is not None:
         sub.abandonment_stage = req.last_question_id

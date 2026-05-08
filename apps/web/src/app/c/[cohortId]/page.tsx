@@ -42,6 +42,7 @@ export default function ConsentPage() {
     if (justSubmitted) {
       sessionStorage.removeItem("analytics_session");
       sessionStorage.removeItem("submission_id");
+      sessionStorage.removeItem("submission_token");
       sessionStorage.removeItem("question_data");
       sessionStorage.removeItem("question_order");
       sessionStorage.removeItem("review_answers");
@@ -92,6 +93,7 @@ export default function ConsentPage() {
     // otherwise the next /survey load would silently write into the
     // wrong submission record.
     sessionStorage.removeItem("submission_id");
+    sessionStorage.removeItem("submission_token");
     sessionStorage.removeItem("question_data");
     sessionStorage.removeItem("question_order");
     sessionStorage.removeItem("review_answers");
@@ -101,8 +103,12 @@ export default function ConsentPage() {
     sessionStorage.removeItem("edit_mode");
     sessionStorage.removeItem("edit_question_id");
     try {
-      const { submission_id } = await api.startSubmission(cohortId);
+      const { submission_id, submission_token } = await api.startSubmission(cohortId);
       sessionStorage.setItem("submission_id", submission_id);
+      // The submission_token is an HMAC the API requires on every
+      // subsequent submission mutation. Stored in sessionStorage so it
+      // dies with the tab; never leaves this origin.
+      sessionStorage.setItem("submission_token", submission_token);
       setContext(cohortId, submission_id);
       trackEvent("survey_start", {}, cohortId, submission_id);
       router.push(`/c/${cohortId}/survey`);

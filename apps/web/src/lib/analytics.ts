@@ -60,6 +60,19 @@ export function setContext(cohortId?: string, submissionId?: string) {
   if (submissionId) _submissionId = submissionId;
 }
 
+// HMAC token returned by /submissions/start. Required by the API on every
+// event/mutation tied to a submission_id. Returns {} when no token exists
+// (e.g. cohort-level events fired before the user clicks Start).
+function _submissionTokenHeader(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const token = sessionStorage.getItem("submission_token");
+    return token ? { "X-Submission-Token": token } : {};
+  } catch {
+    return {};
+  }
+}
+
 function flush() {
   if (_eventQueue.length === 0) return;
 
@@ -76,7 +89,7 @@ function flush() {
   try {
     fetch(`${API_URL}/v1/events`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ..._submissionTokenHeader() },
       body,
       keepalive: true,
     }).catch(() => {});
@@ -203,7 +216,9 @@ export function trackAudioCaptureError(
   trackEvent("audio_capture_error", {
     question_id: questionId,
     error_type: errorType,
-    message: message?.slice(0, 500) ?? null,
+    // Hard cap to avoid persisting large error blobs that could contain
+    // copy/pasted user content or DOM snippets.
+    message: message?.slice(0, 200) ?? null,
   });
 }
 
@@ -227,11 +242,15 @@ export function trackClientError(
   source?: string,
   stack?: string,
 ) {
+  // Caps are deliberately tight: error messages and stacks can occasionally
+  // include user input or response bodies. We want enough context to
+  // diagnose recurring bugs but not enough to be a leakage surface if an
+  // event row is shared.
   trackEvent("client_error", {
     kind,
-    message: message.slice(0, 500),
-    source: source?.slice(0, 300) ?? null,
-    stack: stack?.slice(0, 1500) ?? null,
+    message: message.slice(0, 200),
+    source: source?.slice(0, 200) ?? null,
+    stack: stack?.slice(0, 500) ?? null,
   });
 }
 
@@ -251,13 +270,18 @@ export function trackDropout(
     questions_answered: questionsAnswered,
   });
 
-  if (navigator.sendBeacon) {
+  // sendBeacon does not support custom headers — when we have a
+  // submission token we must use fetch+keepalive instead so the
+  // X-Submission-Token header rides along. Beacon is only used for the
+  // pre-submission case (cohort-only dropout) where no token is needed.
+  const tokenHeader = _submissionTokenHeader();
+  if (navigator.sendBeacon && Object.keys(tokenHeader).length === 0) {
     const blob = new Blob([body], { type: "application/json" });
     navigator.sendBeacon(`${API_URL}/v1/events/dropout`, blob);
   } else {
     fetch(`${API_URL}/v1/events/dropout`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...tokenHeader },
       body,
       keepalive: true,
     }).catch(() => {});
@@ -325,7 +349,7 @@ export async function sendClientEnv(submissionId: string): Promise<void> {
   try {
     await fetch(`${API_URL}/v1/submissions/${submissionId}/client-env`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ..._submissionTokenHeader() },
       body: JSON.stringify(payload),
       keepalive: true,
     });

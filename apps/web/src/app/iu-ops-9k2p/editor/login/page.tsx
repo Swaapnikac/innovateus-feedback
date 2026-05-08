@@ -21,8 +21,8 @@ export default function EditorLoginPage() {
     setError("");
     setLoading(true);
     try {
-      const result = await api.editorLogin(password);
-      localStorage.setItem("editor_token", result.token);
+      // API sets an httpOnly cookie on success. Do not mirror to localStorage.
+      await api.editorLogin(password);
       router.push("/iu-ops-9k2p/editor");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");

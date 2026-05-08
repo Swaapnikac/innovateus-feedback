@@ -229,16 +229,14 @@ function UserTestingAnalyticsContent() {
   }, [cohortId, start, end]);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const token = localStorage.getItem("admin_token");
-      if (!token) {
-        router.replace("/iu-ops-9k2p/login");
-        return;
-      }
-    }
+    // Server-side middleware (apps/web/src/middleware.ts) gates this route
+    // by checking the admin_token cookie before the page is served. If the
+    // cookie is missing, the user is redirected to /iu-ops-9k2p/login
+    // before this component ever renders. The API will also reject any
+    // call without a valid cookie.
     setLoading(true);
     void load();
-  }, [load, router]);
+  }, [load]);
 
   const targets = analytics?.targets;
   const exec = analytics?.executive;

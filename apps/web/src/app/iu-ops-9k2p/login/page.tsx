@@ -21,8 +21,10 @@ export default function AdminLoginPage() {
     setError("");
     setLoading(true);
     try {
-      const result = await api.adminLogin(password);
-      localStorage.setItem("admin_token", result.token);
+      // The API sets an httpOnly cookie on successful login. The cookie is
+      // the source of truth for auth — we deliberately do NOT mirror the
+      // token into localStorage (XSS surface).
+      await api.adminLogin(password);
       router.push("/iu-ops-9k2p/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");

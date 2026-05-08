@@ -37,8 +37,13 @@ def _clean_for_ai(text: str | None) -> str:
     try:
         return strip_pii(text) or ""
     except Exception as e:  # pragma: no cover — regex should not fail
-        logger.warning(f"strip_pii failed, falling back to original text: {e}")
-        return text
+        # Fail closed: if the regex stripper throws, return an empty string
+        # rather than the original text. The "no raw PII to OpenAI" promise
+        # takes priority over the AI extraction succeeding for that one
+        # answer. The answer itself is still saved correctly via the
+        # separate save-time PII pipeline.
+        logger.warning(f"strip_pii failed, dropping AI input to preserve PII guarantee: {e}")
+        return ""
 
 
 # ──────────────────────────────────────────────────────────────────────────────

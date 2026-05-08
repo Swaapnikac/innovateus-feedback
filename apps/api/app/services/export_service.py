@@ -28,6 +28,37 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
 
+
+# Characters that Excel / Google Sheets / LibreOffice treat as the start
+# of a formula when present at the beginning of a cell. A learner whose
+# answer happened to begin with one of these would otherwise get their
+# text executed as a formula when an admin opens the CSV — the classic
+# "CSV formula injection" / "CSV macro" attack class.
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value):
+    """Defuse leading formula characters so spreadsheet apps render cells as text.
+
+    Only strings are mutated; numbers, bools, dates, and ``None`` pass
+    through unchanged so totals and timestamps still parse correctly.
+    The single-quote prefix is the standard Excel-recognised "treat as
+    text" indicator and is stripped automatically when the cell is read
+    back as a plain string.
+    """
+    if not isinstance(value, str):
+        return value
+    if not value:
+        return value
+    if value[0] in _CSV_FORMULA_PREFIXES:
+        return "'" + value
+    return value
+
+
+def _csv_safe_row(row):
+    """Apply ``_csv_safe`` element-wise to anything we hand to ``csv.writer``."""
+    return [_csv_safe(v) for v in row]
+
 from app.models import Answer, Cohort, Extraction, ExtractionReview, Submission
 from app.services.metrics_service import (
     OPEN_TYPES,
@@ -631,7 +662,7 @@ def generate_raw_csv(
             row.append(v)
         for v in _governance_columns(bundle).values():
             row.append(v)
-        writer.writerow(row)
+        writer.writerow(_csv_safe_row(row))
 
     return output.getvalue()
 
@@ -708,7 +739,7 @@ def generate_structured_csv(
         writer.writerow(list(row_dict.keys()))
 
     for r in rows:
-        writer.writerow(r)
+        writer.writerow(_csv_safe_row(r))
 
     return output.getvalue()
 
@@ -865,7 +896,7 @@ def generate_user_testing_csv(bundles: list[SubmissionBundle]) -> str:
             _bool_to_str(flags["h5_voice_natural_support_flag"]) if flags["h5_voice_natural_support_flag"] is not None else "",
             _bool_to_str(flags["h6_device_compatibility_support_flag"]) if flags["h6_device_compatibility_support_flag"] is not None else "",
         ]
-        writer.writerow(row)
+        writer.writerow(_csv_safe_row(row))
 
     return output.getvalue()
 
@@ -902,7 +933,7 @@ def generate_qualtrics_csv(
             questions=questions,
             target=target,
         )
-        writer.writerow(row)
+        writer.writerow(_csv_safe_row(row))
 
     return output.getvalue()
 

@@ -386,13 +386,20 @@ function QuestionEditor({
           )}
 
           <div className="flex flex-wrap items-center gap-6 pt-1">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <Switch
-                checked={question.required}
-                onCheckedChange={(v) => updateField("required", v)}
-              />
-              <span className="text-sm text-brand-blue/70">Required</span>
-            </label>
+            {/* Open-ended questions are intentionally always skippable —
+                forcing a learner to record voice/type a response would
+                undermine the "speak only if you have something to say"
+                premise. Hide the required toggle so editors don't set a
+                value that has no effect at survey time. */}
+            {question.type !== "open" && (
+              <label className="flex items-center gap-2 cursor-pointer">
+                <Switch
+                  checked={question.required}
+                  onCheckedChange={(v) => updateField("required", v)}
+                />
+                <span className="text-sm text-brand-blue/70">Required</span>
+              </label>
+            )}
 
             {question.type === "open" && (
               <label className="flex items-center gap-2 cursor-pointer">

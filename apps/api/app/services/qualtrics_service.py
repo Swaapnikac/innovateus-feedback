@@ -85,10 +85,21 @@ async def _post_response(payload: dict, target: ResolvedTarget) -> tuple[bool, s
             response_id = None
         return True, None, response_id
 
-    body = response.text
-    if len(body) > 500:
-        body = body[:500] + "…(truncated)"
-    return False, f"Qualtrics API returned {response.status_code}: {body}", None
+    # Qualtrics error responses can include API tokens, internal IDs, or
+    # snippets of the failing payload — none of which we want to surface to
+    # admin clients (or general server logs). Log only the status code and a
+    # stable category. Operators who need the full body for debugging can
+    # toggle DEBUG-level logging on demand.
+    qualtrics_error_id = None
+    try:
+        qualtrics_error_id = (response.json().get("meta") or {}).get("error", {}).get("errorCode")
+    except (ValueError, AttributeError):
+        pass
+    logger.debug("qualtrics.api.error_body status=%s body=%s", response.status_code, response.text[:500])
+    summary = f"Qualtrics API returned {response.status_code}"
+    if qualtrics_error_id:
+        summary += f" (errorCode={qualtrics_error_id})"
+    return False, summary, None
 
 
 async def sync_submission(submission_id: uuid.UUID, force: bool = False) -> dict:

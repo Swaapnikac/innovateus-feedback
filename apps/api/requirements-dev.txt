@@ -1,0 +1,11 @@
+# Dev / test-only dependencies. Production deploys (Render) install
+# requirements.txt only — these stay off production hosts.
+
+-r requirements.txt
+
+# Mock AWS services for local DynamoDB/S3 testing. Used by
+# test_all_features.py and run_local.py only — never imported from app/.
+moto[dynamodb]==5.0.0
+
+# Pytest is the only test runner the repo uses. Pinned for reproducibility.
+pytest==8.3.4

@@ -1,9 +1,10 @@
 import io
 import os
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from app.services.transcribe_service import transcribe_audio
 from app.services.ai_service import detect_and_redact_pii_with_ai
 from app.schemas import TranscriptResponse
+from app.rate_limit import limiter, TRANSCRIBE_LIMIT
 
 router = APIRouter()
 
@@ -16,7 +17,8 @@ ALLOWED_CONTENT_TYPES = {
 
 
 @router.post("/transcribe", response_model=TranscriptResponse)
-async def transcribe(audio: UploadFile = File(...)):
+@limiter.limit(TRANSCRIBE_LIMIT)
+async def transcribe(request: Request, audio: UploadFile = File(...)):
     # Validate file type
     filename = audio.filename or ""
     ext = os.path.splitext(filename)[1].lower()

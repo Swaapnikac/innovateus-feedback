@@ -24,12 +24,29 @@ async function _trackLatency(path: string, status: number, ok: boolean, duration
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const authHeaders: Record<string, string> = {};
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem("admin_token") || localStorage.getItem("editor_token");
-    if (token) authHeaders["Authorization"] = `Bearer ${token}`;
+// Read the per-submission HMAC token the API minted at /submissions/start.
+// Submission-mutating endpoints require this on every call as the
+// X-Submission-Token header. Stored in sessionStorage so it dies with
+// the tab and never crosses an origin.
+function _getSubmissionToken(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return sessionStorage.getItem("submission_token");
+  } catch {
+    return null;
   }
+}
+
+function _submissionAuthHeader(): Record<string, string> {
+  const token = _getSubmissionToken();
+  return token ? { "X-Submission-Token": token } : {};
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  // Auth is carried by the httpOnly admin_token / editor_token cookies set
+  // by the API on login. They are sent automatically via credentials:
+  // "include". We deliberately do NOT read tokens from localStorage — that
+  // copy would be readable by any script and is an XSS escalation surface.
   const started = typeof performance !== "undefined" ? performance.now() : Date.now();
   let status = 0;
   let ok = false;
@@ -38,7 +55,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       ...options,
       headers: {
         "Content-Type": "application/json",
-        ...authHeaders,
         ...options.headers,
       },
       credentials: "include",
@@ -339,7 +355,7 @@ export const api = {
     request<SurveyConfig>(`/v1/survey/${cohortId}?_t=${Date.now()}`, { cache: "no-store" }),
 
   startSubmission: (cohortId: string, consentVersion = "1.0") =>
-    request<{ submission_id: string }>("/v1/submissions/start", {
+    request<{ submission_id: string; submission_token: string }>("/v1/submissions/start", {
       method: "POST",
       body: JSON.stringify({
         cohort_id: cohortId,
@@ -367,26 +383,56 @@ export const api = {
   ) =>
     request<{ id: string; question_id: string }>(
       `/v1/submissions/${submissionId}/answer`,
-      { method: "POST", body: JSON.stringify(data) }
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+        headers: _submissionAuthHeader(),
+      }
     ),
 
   completeSubmission: (submissionId: string) =>
     request<{ status: string; extraction: ExtractionResult | null }>(
       `/v1/submissions/${submissionId}/complete`,
-      { method: "POST" }
+      { method: "POST", headers: _submissionAuthHeader() }
     ),
 
   submitExperienceRating: (submissionId: string, rating: number, feedbackText?: string) =>
     request<{ status: string; rating: number }>(`/v1/submissions/${submissionId}/experience-rating`, {
       method: "POST",
       body: JSON.stringify({ rating, feedback_text: feedbackText || undefined }),
+      headers: _submissionAuthHeader(),
     }),
 
   previewExtraction: (submissionId: string) =>
     request<{ status: string; extraction: ExtractionResult | null }>(
       `/v1/submissions/${submissionId}/preview-extraction`,
-      { method: "POST" }
+      { method: "POST", headers: _submissionAuthHeader() }
     ),
+
+  // Returns every answer the server already has for an in-progress
+  // submission so the survey UI can rehydrate state after a tab close.
+  // Without this, sessionStorage is empty on resume, the form looks blank,
+  // but the DB still has the answers — and the review-page summary (which
+  // reads from the DB) shows them, contradicting the form.
+  getSubmissionAnswers: (submissionId: string) =>
+    request<{
+      submission_id: string;
+      status: string;
+      answers: Array<{
+        question_id: string;
+        question_type: string;
+        value: string;
+        multi_values: string[];
+        input_mode: string;
+        transcript: string | null;
+        is_vague: boolean | null;
+        followups: string[];
+        followup_1_answer: string | null;
+        followup_2_answer: string | null;
+      }>;
+    }>(`/v1/submissions/${submissionId}/answers`, {
+      headers: _submissionAuthHeader(),
+    }),
 
   transcribe: async (
     audioBlob: Blob,
@@ -483,10 +529,18 @@ export const api = {
     }),
 
   adminLogin: (password: string) =>
-    request<{ token: string }>("/v1/admin/login", {
+    // Login state is in the httpOnly cookie set by the API; the response
+    // body is just an ack.
+    request<{ status: string }>("/v1/admin/login", {
       method: "POST",
       body: JSON.stringify({ password }),
     }),
+
+  adminLogout: () =>
+    request<{ status: string }>("/v1/admin/logout", { method: "POST" }),
+
+  editorLogout: () =>
+    request<{ status: string }>("/v1/admin/editor/logout", { method: "POST" }),
 
   getMetrics: (params?: { cohort_id?: string; start?: string; end?: string; survey_version?: string; segment_q?: string; segment_v?: string }) => {
     const query = new URLSearchParams();
@@ -594,7 +648,7 @@ export const api = {
     }),
 
   editorLogin: (password: string) =>
-    request<{ token: string }>("/v1/admin/editor/login", {
+    request<{ status: string }>("/v1/admin/editor/login", {
       method: "POST",
       body: JSON.stringify({ password }),
     }),

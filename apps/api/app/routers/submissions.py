@@ -1,4 +1,5 @@
 import asyncio
+import json
 import uuid
 import hashlib
 import logging
@@ -6,6 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from app.db import get_db, async_session
 from app.models import Cohort, Submission, Answer, Extraction
 from app.schemas import (
@@ -16,6 +18,8 @@ from app.schemas import (
     CompleteSubmissionResponse,
     ExperienceRatingRequest,
     ClientEnvRequest,
+    SavedAnswer,
+    SubmissionAnswersResponse,
 )
 from app.services.ai_service import (
     extract_structured,
@@ -27,12 +31,37 @@ from app.services.cohort_resolver import resolve_cohort
 from app.services.pii_service import strip_pii, strip_pii_with_meta
 from app.services.user_agent_service import parse_user_agent
 from app.config import get_settings
+from app.log_utils import safe_err
+from app.submission_session import (
+    mint_submission_token,
+    require_submission_token,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 _OPEN_TYPES = {"open", "short_text"}
+
+
+def _ensure_started(sub: Submission) -> None:
+    """Reject mutations on submissions that are no longer in-progress.
+
+    Once a submission is ``completed``/``abandoned`` the row is, from the
+    learner's perspective, "sealed" — the answers have been synced to
+    Qualtrics and shown to admins. Allowing further writes (even with a
+    valid token) would let a leaked or scraped X-Submission-Token modify
+    data after the fact, breaking the integrity story we promise to
+    program teams.
+
+    A separate 409 (rather than 401) makes the error self-explanatory in
+    logs: "you had the right token, but the row is closed".
+    """
+    if sub.status != "started":
+        raise HTTPException(
+            status_code=409,
+            detail="This submission is no longer accepting changes.",
+        )
 
 
 def _get_client_ip(request: Request) -> str:
@@ -45,7 +74,11 @@ def _get_client_ip(request: Request) -> str:
 
 
 def _hash_ip(ip: str) -> str:
-    salt = get_settings().jwt_secret
+    # Prefer the dedicated IP_HASH_SALT so rotating JWT_SECRET does not
+    # invalidate every analytics IP hash. Falls back to jwt_secret for
+    # deployments that haven't set IP_HASH_SALT yet.
+    settings = get_settings()
+    salt = settings.ip_hash_salt or settings.jwt_secret
     return hashlib.sha256(f"{salt}:{ip}".encode()).hexdigest()
 
 
@@ -131,7 +164,11 @@ async def start_submission(req: StartSubmissionRequest, request: Request, db: As
     in_progress = in_progress_q.scalars().all()
     if in_progress:
         in_progress.sort(key=lambda s: s.created_at or datetime.min, reverse=True)
-        return StartSubmissionResponse(submission_id=in_progress[0].id)
+        sid = in_progress[0].id
+        return StartSubmissionResponse(
+            submission_id=sid,
+            submission_token=mint_submission_token(sid),
+        )
 
     now = datetime.now(timezone.utc)
     submission = Submission(
@@ -146,15 +183,47 @@ async def start_submission(req: StartSubmissionRequest, request: Request, db: As
         last_activity_at=now,
     )
     db.add(submission)
-    await db.flush()
 
-    return StartSubmissionResponse(submission_id=submission.id)
+    # Migration 009 enforces a partial unique index on
+    # ``(cohort_id, ip_hash) WHERE status='started'``. If two requests
+    # race past the in-progress check above, exactly one INSERT wins and
+    # the other gets an IntegrityError — which we resolve by re-reading
+    # the surviving row and returning its token.
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        existing_q = await db.execute(
+            select(Submission).where(
+                Submission.ip_hash == ip_hash,
+                Submission.cohort_id == cohort_uuid,
+                Submission.status == "started",
+            )
+        )
+        existing = existing_q.scalar_one_or_none()
+        if existing is None:
+            # Nothing in flight — must have been a different unique
+            # collision. Surface a generic 409 so the client can retry.
+            raise HTTPException(
+                status_code=409,
+                detail="Could not start submission. Please retry.",
+            )
+        return StartSubmissionResponse(
+            submission_id=existing.id,
+            submission_token=mint_submission_token(existing.id),
+        )
+
+    return StartSubmissionResponse(
+        submission_id=submission.id,
+        submission_token=mint_submission_token(submission.id),
+    )
 
 
 @router.post("/submissions/{submission_id}/client-env")
 async def save_client_env(
     submission_id: uuid.UUID,
     req: ClientEnvRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Capture the participant's browser/OS/device/network characteristics.
@@ -162,10 +231,12 @@ async def save_client_env(
     Called once at the start of the survey. Writes parsed UA components so the
     dashboard doesn't have to re-parse on every query. H6 signal source.
     """
+    require_submission_token(request, submission_id)
     result = await db.execute(select(Submission).where(Submission.id == submission_id))
     sub = result.scalar_one_or_none()
     if not sub:
         raise HTTPException(status_code=404, detail="Submission not found")
+    _ensure_started(sub)
 
     sub.user_agent = req.user_agent
     sub.screen_size = req.screen_size
@@ -188,11 +259,18 @@ async def save_client_env(
 
 
 @router.post("/submissions/{submission_id}/answer", response_model=AnswerResponse)
-async def save_answer(submission_id: uuid.UUID, req: AnswerRequest, db: AsyncSession = Depends(get_db)):
+async def save_answer(
+    submission_id: uuid.UUID,
+    req: AnswerRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    require_submission_token(request, submission_id)
     result = await db.execute(select(Submission).where(Submission.id == submission_id))
     sub = result.scalar_one_or_none()
     if not sub:
         raise HTTPException(status_code=404, detail="Submission not found")
+    _ensure_started(sub)
 
     # PII strip every user-facing string and track redactions on the submission
     # so the governance dashboard reflects reality. The AI layer catches
@@ -455,11 +533,17 @@ def _split_extraction(extraction_with_meta: dict) -> tuple[dict, dict]:
 
 
 @router.post("/submissions/{submission_id}/preview-extraction", response_model=CompleteSubmissionResponse)
-async def preview_extraction(submission_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def preview_extraction(
+    submission_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    require_submission_token(request, submission_id)
     result = await db.execute(select(Submission).where(Submission.id == submission_id))
     sub = result.scalar_one_or_none()
     if not sub:
         raise HTTPException(status_code=404, detail="Submission not found")
+    _ensure_started(sub)
 
     answers_q = await db.execute(select(Answer).where(Answer.submission_id == submission_id))
     answers = answers_q.scalars().all()
@@ -470,10 +554,85 @@ async def preview_extraction(submission_id: uuid.UUID, db: AsyncSession = Depend
         raw = await extract_structured(answers_for_extraction)
         extraction_data, _ = _split_extraction(raw)
     except Exception as e:
-        logger.warning(f"Preview extraction failed for {submission_id}: {e}")
+        logger.warning("Preview extraction failed for %s: %s", submission_id, safe_err(e))
         extraction_data = dict(_EMPTY_EXTRACTION)
 
     return CompleteSubmissionResponse(status="preview", extraction=extraction_data)
+
+
+@router.get(
+    "/submissions/{submission_id}/answers",
+    response_model=SubmissionAnswersResponse,
+)
+async def get_submission_answers(
+    submission_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return all saved answers for an in-progress submission so the
+    survey UI can rehydrate after the learner closed the tab.
+
+    Without this, sessionStorage gets wiped on tab close, the form looks
+    empty on resume, but the DB still has the answers — and the review
+    summary (which reads from the DB) ends up disagreeing with the form.
+
+    Token-gated like every other per-submission endpoint, and limited to
+    submissions still in ``started``: completed / abandoned rows are sealed
+    and never need rehydration.
+    """
+    require_submission_token(request, submission_id)
+    result = await db.execute(select(Submission).where(Submission.id == submission_id))
+    sub = result.scalar_one_or_none()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    _ensure_started(sub)
+
+    rows_q = await db.execute(
+        select(Answer).where(Answer.submission_id == submission_id)
+    )
+    rows = rows_q.scalars().all()
+
+    saved: list[SavedAnswer] = []
+    for a in rows:
+        raw = a.answer_raw or ""
+        multi_values: list[str] = []
+        # ``multi``/``ranking`` answers are stored by the client as a JSON
+        # array string (see survey/page.tsx ``saveCurrentAnswer``). Parse it
+        # back here so the client can drop the result straight into state.
+        if a.question_type in ("multi", "ranking") and raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    multi_values = [str(x) for x in parsed]
+            except (ValueError, TypeError):
+                multi_values = []
+
+        followups: list[str] = []
+        if a.followup_1:
+            followups.append(a.followup_1)
+        if a.followup_2:
+            followups.append(a.followup_2)
+
+        saved.append(
+            SavedAnswer(
+                question_id=a.question_id,
+                question_type=a.question_type,
+                value=raw,
+                multi_values=multi_values,
+                input_mode=a.input_mode or "voice",
+                transcript=a.transcript,
+                is_vague=a.is_vague,
+                followups=followups,
+                followup_1_answer=a.followup_1_answer,
+                followup_2_answer=a.followup_2_answer,
+            )
+        )
+
+    return SubmissionAnswersResponse(
+        submission_id=sub.id,
+        status=sub.status,
+        answers=saved,
+    )
 
 
 async def _run_extraction_in_background(submission_id: uuid.UUID, answers_for_extraction: list[dict]):
@@ -557,14 +716,46 @@ async def _run_extraction_in_background(submission_id: uuid.UUID, answers_for_ex
 @router.post("/submissions/{submission_id}/complete", response_model=CompleteSubmissionResponse)
 async def complete_submission(
     submission_id: uuid.UUID,
+    request: Request,
     response: Response,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
+    require_submission_token(request, submission_id)
     result = await db.execute(select(Submission).where(Submission.id == submission_id))
     sub = result.scalar_one_or_none()
     if not sub:
         raise HTTPException(status_code=404, detail="Submission not found")
+
+    # Idempotent /complete: if the row is already completed, short-circuit
+    # with the existing extraction (or the empty placeholder). This stops a
+    # double click — or a malicious replay — from re-queueing OpenAI
+    # extraction and re-syncing to Qualtrics, which would rack up cost
+    # and risk creating duplicate Qualtrics responses.
+    if sub.status == "completed":
+        existing_ext_q = await db.execute(
+            select(Extraction).where(Extraction.submission_id == submission_id)
+        )
+        existing_ext = existing_ext_q.scalar_one_or_none()
+        ext_payload = (
+            {
+                "what_was_tried": existing_ext.what_was_tried,
+                "planned_task_or_workflow": existing_ext.planned_task_or_workflow,
+                "outcome_or_expected_outcome": existing_ext.outcome_or_expected_outcome,
+                "barriers": existing_ext.barriers,
+                "enablers": existing_ext.enablers,
+                "public_benefit": existing_ext.public_benefit,
+                "top_themes": existing_ext.top_themes,
+                "success_story_candidate": existing_ext.success_story_candidate,
+            }
+            if existing_ext is not None
+            else dict(_EMPTY_EXTRACTION)
+        )
+        return CompleteSubmissionResponse(status="completed", extraction=ext_payload)
+
+    # If the row was abandoned (or any non-started state besides
+    # completed), refuse — same reasoning as the other mutation endpoints.
+    _ensure_started(sub)
 
     answers_q = await db.execute(select(Answer).where(Answer.submission_id == submission_id))
     answers = answers_q.scalars().all()
@@ -663,11 +854,33 @@ async def complete_submission(
 
 
 @router.post("/submissions/{submission_id}/experience-rating")
-async def save_experience_rating(submission_id: uuid.UUID, req: ExperienceRatingRequest, db: AsyncSession = Depends(get_db)):
+async def save_experience_rating(
+    submission_id: uuid.UUID,
+    req: ExperienceRatingRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    require_submission_token(request, submission_id)
     result = await db.execute(select(Submission).where(Submission.id == submission_id))
     sub = result.scalar_one_or_none()
     if not sub:
         raise HTTPException(status_code=404, detail="Submission not found")
+
+    # Experience rating is collected on the "thank you" page AFTER /complete,
+    # so we cannot use ``_ensure_started`` here. Instead, allow the rating
+    # only on a row that has reached ``completed`` and only when no rating
+    # has been written yet — this still bounds how often a leaked token
+    # can mutate the row to "exactly once after completion".
+    if sub.status != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot rate an experience that has not been submitted.",
+        )
+    if sub.experience_rating is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Experience rating has already been recorded.",
+        )
 
     sub.experience_rating = req.rating
     sub.experience_feedback = strip_pii(req.feedback_text) if req.feedback_text else None

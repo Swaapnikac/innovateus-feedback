@@ -258,6 +258,7 @@ export default function ReviewPage() {
   // /done only needs `extraction`, so that and analytics_session survive.
   const wipeCompletedSubmissionState = () => {
     sessionStorage.removeItem("submission_id");
+    sessionStorage.removeItem("submission_token");
     sessionStorage.removeItem("question_data");
     sessionStorage.removeItem("question_order");
     sessionStorage.removeItem("edit_mode");

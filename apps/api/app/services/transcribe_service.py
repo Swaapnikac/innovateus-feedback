@@ -2,6 +2,7 @@ import io
 import logging
 from openai import AsyncOpenAI
 from app.config import get_settings
+from app.log_utils import safe_err
 
 logger = logging.getLogger(__name__)
 
@@ -26,5 +27,5 @@ async def transcribe_audio(audio_buffer: io.BytesIO) -> str:
         return response.strip() if isinstance(response, str) else response.text.strip()
     except Exception as e:
         audio_buffer.close()
-        logger.error(f"Transcription failed: {e}")
+        logger.error("Transcription failed: %s", safe_err(e))
         raise

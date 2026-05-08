@@ -52,7 +52,14 @@ async def require_admin(request: Request):
     token = _extract_token(request, "admin_token")
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    return verify_token(token)
+    payload = verify_token(token)
+    # Enforce manager role explicitly. Without this check, an editor JWT would
+    # pass require_admin because both tokens are signed with the same secret —
+    # editor login could escalate to full admin (delete responses, exports,
+    # Qualtrics sync, etc.).
+    if payload.get("role") != "manager":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return payload
 
 
 async def require_editor(request: Request):
