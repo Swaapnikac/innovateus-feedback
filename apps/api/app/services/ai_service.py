@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from openai import AsyncOpenAI
@@ -220,34 +221,111 @@ def _coerce_score(value, is_vague: bool) -> float | None:
         return 0.7 if is_vague else 0.1
 
 
+# Defense-in-depth post-filter on AI-generated follow-up questions.
+#
+# The follow-up is the only string the model produces that ever ends up
+# rendered to a learner. The system prompts already tell the model never
+# to ask for personal information, but a successful prompt-injection (or
+# just an off-day from the model) could still produce a question like
+# "What is your email?" or one that echoes a real email back. We catch
+# those here and drop them, falling through to the existing "no follow-up
+# needed" path. Word-boundary anchored, case-insensitive.
+_UNSAFE_FOLLOWUP_TERMS = (
+    r"e[\W_]?mail",
+    r"phone",
+    r"address(?:es)?",
+    r"\bhome\b",
+    r"\bzip\b",
+    r"postal",
+    r"\bssn\b",
+    r"social\s+security",
+    r"date\s+of\s+birth",
+    r"\bdob\b",
+    r"full\s+name",
+    r"last\s+name",
+    r"first\s+name",
+    r"agency\s+name",
+    r"department\s+name",
+    r"account\s+number",
+    r"\blicense\b",
+)
+_UNSAFE_FOLLOWUP_RE = re.compile(
+    r"(?i)(?:" + "|".join(_UNSAFE_FOLLOWUP_TERMS) + r")",
+)
+
+
+def _is_unsafe_followup(text: str) -> bool:
+    """Return True when a model-generated follow-up is unsafe to show.
+
+    Two checks:
+    1. The text matches a regex blacklist of personal-info-asking
+       patterns (email, phone, address, SSN, DOB, full/first/last name,
+       agency/department name, etc.).
+    2. The text, when run through the regex PII stripper, produces any
+       redactions — i.e. the model literally echoed an email/phone/etc.
+       back into the question.
+
+    Either condition is sufficient to drop the follow-up.
+    """
+    if not text or not text.strip():
+        return False
+    if _UNSAFE_FOLLOWUP_RE.search(text):
+        return True
+    try:
+        pii_meta = strip_pii_with_meta(text)
+        if pii_meta.count > 0:
+            return True
+    except Exception:
+        # If the regex stripper itself blows up (shouldn't happen), err
+        # on the side of caution and drop the follow-up.
+        return True
+    return False
+
+
 def _coerce_followups(value, limit: int = 1) -> list[str]:
     """Normalise the ``followups`` field from a model response.
 
     GPT-5 is told to return ``followups: [...]`` but sometimes wraps the
     question in a string, returns ``null``, or returns an object. Defend
     against every garbage shape so we never 500 on the router.
+
+    Also runs ``_is_unsafe_followup`` on every candidate as the last
+    step. Anything asking for / echoing personal info is dropped and
+    logged at WARNING with a sha-256 of the offending text — never the
+    text itself.
     """
+    raw: list[str] = []
     if value is None:
         return []
     if isinstance(value, str):
         stripped = value.strip()
-        return [stripped] if stripped else []
-    if isinstance(value, (list, tuple)):
-        clean: list[str] = []
+        if stripped:
+            raw.append(stripped)
+    elif isinstance(value, (list, tuple)):
         for item in value:
             if isinstance(item, str) and item.strip():
-                clean.append(item.strip())
+                raw.append(item.strip())
             elif isinstance(item, dict):
                 for key in ("question", "text", "followup"):
                     if isinstance(item.get(key), str) and item[key].strip():
-                        clean.append(item[key].strip())
+                        raw.append(item[key].strip())
                         break
-        return clean[:limit]
-    if isinstance(value, dict):
+    elif isinstance(value, dict):
         for key in ("question", "text", "followup"):
             if isinstance(value.get(key), str) and value[key].strip():
-                return [value[key].strip()][:limit]
-    return []
+                raw.append(value[key].strip())
+                break
+
+    safe: list[str] = []
+    for candidate in raw:
+        if _is_unsafe_followup(candidate):
+            logger.warning(
+                "ai.followup.dropped reason=unsafe_pii_request hash=%s",
+                _cache_key(candidate),
+            )
+            continue
+        safe.append(candidate)
+    return safe[:limit]
 
 
 async def detect_vagueness(question_text: str, answer_text: str) -> dict:
